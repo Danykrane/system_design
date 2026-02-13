@@ -1,6 +1,5 @@
 # Discord-подобный сервис: голос/видеозвонки real-time (WebRTC + SFU)
-
-> **Формат:** расчётно‑пояснительная записка в `README.md` (Markdown).  
+  
 > **Фокус MVP:** voice/video для каналов сообществ (guild/server → voice channel), медиатрафик через SFU, сигналинг через WS/HTTP.
 
 ---
