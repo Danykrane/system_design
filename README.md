@@ -18,7 +18,7 @@
 ### 1.1 Тип сервиса
 Массовый B2C сервис (desktop + mobile + web). Существенная логика на бэкенде: сигналинг, распределение по регионам, NAT traversal (ICE/STUN/TURN), медиасерверы (SFU), мониторинг качества, failover.
 
-### 1.2 Тема (что проектируем в MVP)
+### 1.2 Тема
 **Real‑time voice/video calls** в “серверной” модели (guild → voice channel):
 - многопользовательский voice,
 - video в комнате (несколько активных видео),
@@ -31,7 +31,7 @@
 - **Discord** — основной аналог (voice/video в сообществах), публично указывает “200M+ monthly active users”.
 - B2B аналоги по технологии: Zoom / Teams / Slack Huddles (подтверждают рынок real‑time calls).
 
-### 1.4 Целевая аудитория (размер и местоположение)
+### 1.4 Целевая аудитория
 Для учебного проекта фиксируем целевую нагрузку:
 - **MAU:** 50,000,000 / месяц (глобально)
 - **DAU:** 10,000,000 / день (глобально)
@@ -45,7 +45,7 @@
 
 ---
 
-## 1.5 MVP: ключевой функционал (7 функций)
+## 1.5 MVP: ключевой функционал
 
 1) **Auth + device sessions** (JWT/refresh).  
 2) **Join voice channel**: выбрать регион/endpoint, получить ICE‑конфиг, токен и параметры сессии.  
@@ -59,9 +59,9 @@
 
 ---
 
-# 2. Расчёт нагрузки (продуктовые → технические метрики)
+# 2. Расчёт нагрузки
 
-## 2.1 Входные допущения (MVP workload profile)
+## 2.1 Входные допущения
 
 ### Аудитория и вовлечённость
 - **DAU = 10,000,000**
@@ -86,7 +86,7 @@
 
 ---
 
-## 2.2 Продуктовые метрики (сводная таблица)
+## 2.2 Продуктовые метрики
 
 | Метрика | Значение | Как получено |
 |---|---:|---|
@@ -108,7 +108,7 @@
 
 ---
 
-## 2.3 Размер хранилища (в штуках и ГБ)
+## 2.3 Размер хранилища
 
 > В MVP **медиа не хранится** (нет записи). Храним: профили/сессии, журналы сессий, QoE‑телеметрию (агрегаты), конфиги.
 
@@ -119,7 +119,7 @@
 | Voice join log | bytes/join | ~300 B | session_id, channel_id, region, timestamps, result |
 | QoE report (агрегат) | bytes/min | ~120 B | jitter, loss, rtt, bitrate (сжатый JSON/Protobuf) |
 
-### 2.3.2 Итого по системе (primary storage, без реплик)
+### 2.3.2 Итого по системе
 | Блок | Объём | Как получено |
 |---|---:|---|
 | User metadata | 325.96 GB | MAU × 7KB |
@@ -150,7 +150,7 @@
 
 ---
 
-### 2.4.2 Сетевой трафик (пик и суммарный)
+### 2.4.2 Сетевой трафик
 
 #### A) Media traffic (основной)
 Принятые битрейты (на проводе, приблизительно):
@@ -190,14 +190,14 @@
 
 ---
 
-## 2.5 Что дальше по заданию (ориентир)
+## 2.5 Что дальше по заданию
 - В глобальной балансировке (GeoDNS/Anycast) ключевое — **latency** и стоимость egress.
 - В локальной балансировке считать не только L7 RPS, но и **UDP capacity** на медиасерверах.
 - Для БД: основная нагрузка — QoE/логирование/конфиги; можно разнести OLTP (Postgres) и time‑series (ClickHouse/TSDB).
 
 ---
 
-## Источники (нумерованный список)
+## Источники
 1. Discord — “About Discord / company: 200M+ monthly active users”. https://discord.com/company  
 2. Discord Engineering Blog — “How Discord Handles Two and Half Million Concurrent Voice Users using WebRTC”. https://discord.com/blog/how-discord-handles-two-and-half-million-concurrent-voice-users-using-webrtc  
 3. Discord Developer Docs — “Voice Connections (DAVE / E2EE), only E2EE calls starting March 1st, 2026”. https://discord.com/developers/docs/topics/voice-connections  
