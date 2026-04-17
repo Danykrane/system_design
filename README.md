@@ -78,15 +78,98 @@ $k_{serviceUse}=0.49\cdot10\%+0.5\cdot5\%\approx7.4\%$
 | Среднее число start / stop записи на 1 пользователя в день | $A_{rec/user}=\dfrac{DU_{screen}\cdot2}{DAU}$ | 0.04 | см. допущение 9 |
 
 **Допущения к продуктовым метрикам:**
-1. Для Discord-like сервиса принято, что в течение дня **20% DAU** заходят в голосовые комнаты, **4% DAU** включают камеру и **2% DAU** запускают скринкаст.
-2. Средняя длительность использования принята как **40 минут** для голосовых комнат, **20 минут** для camera-video и **15 минут** для screenshare.
-3. Прокси **DAU / MAU = 0.45** взят из Discord: **90M+ DAU** и **200M+ MAU**.
-4. Для хранения принято, что запись создаётся для каждой screenshare-сессии и хранится в облаке.
-5. На одного активного пользователя голосовых комнат принято **2 сессии в день**.
-6. На одного активного пользователя голосовых комнат принято **4 действия mute / unmute в день**.
-7. На одного активного пользователя с камерой принято **2 действия camera on / off в день**.
-8. На одного активного пользователя со скринкастом принято **2 действия в день**: start и stop.
-9. Для MVP принято, что управление записью звонка по частоте действий совпадает с управлением screenshare.
+### Допущения и их обоснование
+
+1. **Доля DAU, использующая голосовые комнаты, камеру и скринкаст**
+   
+   В расчёте нагрузки приняты следующие проектные коэффициенты:
+   - 20% DAU используют голосовые комнаты;
+   - 4% DAU включают камеру;
+   - 2% DAU запускают скринкаст.
+
+   Эти значения **не являются напрямую опубликованной статистикой Discord или австралийского рынка**, поэтому используются как **проектные допущения**. Они выбраны как консервативные на фоне более широких рыночных показателей использования app-based communication в Австралии:
+   - 84% взрослых использовали `messaging/calling apps`;
+   - 61% использовали `app voice calls`;
+   - 61% использовали `app video calls`;
+   - 58% использовали communication/social app для `voice or video calls` за последние 7 дней;
+   - среди аудитории 18–24 Discord использовали 39% за последние 6 месяцев, 26% за последние 7 дней и 18% — именно для `video or voice calls`.
+
+   **Источник:** [ACMA — How we communicate, 2024](https://www.acma.gov.au/sites/default/files/2025-07/How%20we%20communicate%20-%20Executive%20summary%20and%20key%20findings_0.pdf)
+
+2. **Средняя длительность использования**
+   
+   В расчёте приняты:
+   - 40 минут для голосовых комнат;
+   - 20 минут для camera-video;
+   - 15 минут для screenshare.
+
+   Значение **40 минут** можно использовать как внешний ориентир, потому что у бесплатных Zoom Meetings стандартный лимит встречи составляет 40 минут.  
+   Значения **20 минут** и **15 минут** — это **производные консервативные допущения**, принятые как более короткие подмножества от типичной сессии.
+
+   **Источник для 40 минут:** [Zoom Support — Understanding time limits for Zoom Meetings](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0067966)
+
+3. **Прокси DAU / MAU**
+   
+   Для пересчёта MAU в DAU используется:
+   $k_{DAU/MAU}=90/200=0.45$
+
+   Это **derived proxy**, а не официальный коэффициент Discord. Он получен из двух публично заявленных метрик:
+   - `90M+ daily active users` — [Discord Social SDK](https://discord.com/developers/social-sdk)
+   - `200+ million monthly active users` — [Discord press release](https://discord.com/press-releases/social-sdk-ingame-communications)
+
+4. **Запись создаётся для каждой screenshare-сессии и хранится в облаке**
+   
+   Это **продуктовое решение MVP**, а не внешняя статистика поведения пользователей. Оно обосновано тем, что у зрелых аналогов cloud recording является стандартным сценарием: запись запускается из meeting controls и сохраняется в облако.
+
+   **Источник:** [Zoom Support — Starting a cloud recording](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0062627)
+
+5. **Две голосовые сессии в день на активного пользователя**
+   
+   В расчёте принято **2 голосовые сессии в день** на одного активного пользователя голосовых комнат.
+
+   Это значение является **проектным допущением**. Открытой Discord telemetry по количеству voice-room sessions/day на пользователя нет, поэтому коэффициент задаётся вручную как консервативный.
+
+6. **Четыре действия mute / unmute в день**
+   
+   В расчёте принято **4 действия mute / unmute** в день на одного активного voice-user.
+
+   Это также **проектное допущение**. Внешний источник подтверждает только наличие самого control в Discord:
+   - есть отдельная команда `Toggle Mute`;
+   - есть shortcut `Ctrl + Shift + M` / `⌘ + Shift + M`.
+
+   **Источники:**  
+   - [Discord Support — Discord Commands, Shortcuts, and Navigation Guide](https://support.discord.com/hc/en-us/articles/31232432266647-Discord-Commands-Shortcuts-and-Navigation-Guide)  
+   - [Discord Support — How do I add different Keybinds?](https://support.discord.com/hc/en-us/articles/217083547-How-do-I-add-different-Keybinds)
+
+7. **Два действия camera on / off в день**
+   
+   В расчёте принято **2 действия camera on / off** в день на одного активного пользователя с камерой.
+
+   Это **проектное допущение**, соответствующее одной video-session в день. Внешний источник подтверждает механику включения и выключения камеры:
+   - пользователь может включить камеру в звонке;
+   - затем выключить её той же кнопкой.
+
+   **Источники:**  
+   - [Discord Support — Video Calls](https://support.discord.com/hc/en-us/articles/360041721052-Video-Calls)  
+   - [Discord Support — Group Chat and Calls](https://support.discord.com/hc/en-us/articles/223657667-Group-Chat-and-Calls)
+
+8. **Два действия start / stop для screenshare**
+   
+   В расчёте принято **2 действия в день** на одного активного пользователя со скринкастом:
+   - `start screenshare`
+   - `stop screenshare`
+
+   Это не рыночная метрика, а **структурное проектное допущение**, соответствующее одной screenshare-сессии. Внешний источник подтверждает сам сценарий `Go Live / Screen Share` в Discord.
+
+   **Источник:** [Discord Support — Go Live and Screen Share](https://support.discord.com/hc/en-us/articles/360040816151-Go-Live-and-Screen-Share)
+
+9. **Частота управления записью совпадает с частотой screenshare**
+   
+   Для MVP принято, что частота действий `start / stop recording` совпадает с частотой `start / stop screenshare`.
+
+   Это **проектное допущение**, так как запись в расчёте рассматривается как связанный со screenshare сценарий. Внешний источник подтверждает, что запись действительно управляется отдельными действиями `Record`, `Pause recording`, `Stop recording`.
+
+   **Источник:** [Zoom Support — Starting a cloud recording](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0062627)
 
 ### Технические метрики
 
