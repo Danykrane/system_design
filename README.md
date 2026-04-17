@@ -57,136 +57,67 @@ $k_{serviceUse}=0.49\cdot10\%+0.5\cdot5\%\approx7.4\%$
 
 ## Часть 2. Расчёт нагрузки
 
-### Базовые коэффициенты и входные данные
-
-| Параметр | Формула | Значение | Источник / комментарий |
-|---|---|---:|---|
-| MAU | — | 1,223,960 | из части 1 |
-| DAU | — | 550,782 | из части 1 |
-| DAU / MAU | $k_{DAU/MAU}=90/200=0.45$ | 0.45 | прокси из Discord: 90M+ DAU [^5] и 200M+ MAU [^1] |
-| Audio egress на 1 concurrent voice user | $B_{voice}=\dfrac{220\ \text{Gbit/s}}{2.6\cdot10^6}=84.6\ \text{kbit/s}$ | 84.6 kbit/s | Discord Engineering: 2.6 млн concurrent voice users и >220 Gbit/s egress [^8] |
-| Video ingress на 1 participant | $B_{video,in}=\dfrac{50\ \text{MB/s}\cdot8}{150}=2.67\ \text{Mbit/s}$ | 2.67 Mbit/s | LiveKit benchmark: 150 participants, 50 MB/s ingress [^9] |
-| Video egress на 1 participant | $B_{video,out}=\dfrac{93\ \text{MB/s}\cdot8}{150}=4.96\ \text{Mbit/s}$ | 4.96 Mbit/s | LiveKit benchmark: 150 participants, 93 MB/s egress [^9] |
-| Доля DAU, использующая voice в день | $k_{voice}=20\%$ | 20% | см. допущение 1 |
-| Доля DAU, включающая camera-video в день | $k_{camera}=4\%$ | 4% | см. допущение 1 |
-| Доля DAU, включающая screenshare в день | $k_{screen}=2\%$ | 2% | см. допущение 1 |
-| Средняя длительность voice в день | $T_{voice}=40\ \text{мин}$ | 40 мин | см. допущение 2 |
-| Средняя длительность camera-video в день | $T_{camera}=20\ \text{мин}$ | 20 мин | см. допущение 2 |
-| Средняя длительность screenshare в день | $T_{screen}=15\ \text{мин}$ | 15 мин | см. допущение 2 |
-| Коэффициент пика | $k_{peak}=3$ | 3 | см. допущение 3 |
-
-**Допущения к таблице:**
-1. Для Discord-like сервиса принято, что в течение дня **20% DAU** заходят в voice, **4% DAU** включают камеру и **2% DAU** включают screenshare. Это проектная нагрузочная модель, потому что точных Australia-specific product telemetry по новому сервису нет.  
-2. Средняя длительность использования принята как **40 мин для voice**, **20 мин для camera-video** и **15 мин для screenshare**. Это допущение нужно, чтобы перевести DAU в среднюю concurrency.  
-3. Пиковая нагрузка принята как **3× от средней**: это типовое проектное допущение для consumer-сервиса с вечерним пиком.
-
----
-
 ### Продуктовые метрики
 
 | Метрика | Формула | Значение | Источник / комментарий |
 |---|---|---:|---|
-| MAU | — | 1,223,960 | из части 1 |
-| DAU | — | 550,782 | из части 1 |
-| Daily voice users | $DU_{voice}=DAU\cdot20\%=550{,}782\cdot0.20$ | 110,156 | рассчитано из DAU и $k_{voice}$ |
-| Daily camera users | $DU_{camera}=DAU\cdot4\%=550{,}782\cdot0.04$ | 22,031 | рассчитано из DAU и $k_{camera}$ |
-| Daily screenshare users | $DU_{screen}=DAU\cdot2\%=550{,}782\cdot0.02$ | 11,016 | рассчитано из DAU и $k_{screen}$ |
-| Входы в voice room на 1 пользователя в день | $A_{join/user}=\dfrac{DU_{voice}\cdot2}{DAU}$ | 0.40 | см. допущение 4 |
-| Выходы из voice room на 1 пользователя в день | $A_{leave/user}=\dfrac{DU_{voice}\cdot2}{DAU}$ | 0.40 | см. допущение 4 |
-| Mute / unmute на 1 пользователя в день | $A_{mute/user}=\dfrac{DU_{voice}\cdot4}{DAU}$ | 0.80 | см. допущение 5 |
-| Camera on / off на 1 пользователя в день | $A_{camera/user}=\dfrac{DU_{camera}\cdot2}{DAU}$ | 0.08 | см. допущение 6 |
-| Screenshare start / stop на 1 пользователя в день | $A_{screen/user}=\dfrac{DU_{screen}\cdot2}{DAU}$ | 0.04 | см. допущение 7 |
-| Recording start / stop на 1 пользователя в день | $A_{rec/user}=\dfrac{DU_{screen}\cdot2}{DAU}$ | 0.04 | см. допущение 8 |
+| Месячная аудитория (MAU) | — | 1,223,960 | из части 1 |
+| Дневная аудитория (DAU) | — | 550,782 | из части 1 |
+| Среднее число пользователей голосовых комнат в день | $DU_{voice}=DAU\cdot20\%=550{,}782\cdot0.20$ | 110,156 | см. допущение 1 |
+| Среднее число пользователей с камерой в день | $DU_{camera}=DAU\cdot4\%=550{,}782\cdot0.04$ | 22,031 | см. допущение 1 |
+| Среднее число пользователей со скринкастом в день | $DU_{screen}=DAU\cdot2\%=550{,}782\cdot0.02$ | 11,016 | см. допущение 1 |
+| Средний размер хранения на 1 пользователя: записи звонков, шт/мес | $N_{rec/user}=\dfrac{DAU}{MAU}\cdot2\%\cdot30=0.45\cdot0.02\cdot30$ | 0.27 | см. допущение 4 |
+| Средний размер хранения на 1 пользователя: аудио в записях, ГБ/мес | $S_{audio/user}=0.27\cdot\dfrac{84.6\ \text{kbit/s}\cdot15\cdot60}{8\cdot10^6}$ | 0.0026 | на основе Discord voice traffic [^8] |
+| Средний размер хранения на 1 пользователя: видео скринкаста в записях, ГБ/мес | $S_{video/user}=0.27\cdot\dfrac{2.67\ \text{Mbit/s}\cdot15\cdot60}{8\cdot10^3}$ | 0.0811 | на основе LiveKit 720p benchmark [^9] |
+| Средний размер хранения на 1 пользователя: всего, ГБ/мес | $S_{total/user}=0.0026+0.0811$ | 0.0837 | 83.7 MB / user / month |
+| Среднее число входов в голосовую комнату на 1 пользователя в день | $A_{join/user}=\dfrac{DU_{voice}\cdot2}{DAU}$ | 0.40 | см. допущение 5 |
+| Среднее число выходов из голосовой комнаты на 1 пользователя в день | $A_{leave/user}=\dfrac{DU_{voice}\cdot2}{DAU}$ | 0.40 | см. допущение 5 |
+| Среднее число mute / unmute на 1 пользователя в день | $A_{mute/user}=\dfrac{DU_{voice}\cdot4}{DAU}$ | 0.80 | см. допущение 6 |
+| Среднее число camera on / off на 1 пользователя в день | $A_{camera/user}=\dfrac{DU_{camera}\cdot2}{DAU}$ | 0.08 | см. допущение 7 |
+| Среднее число start / stop скринкаста на 1 пользователя в день | $A_{screen/user}=\dfrac{DU_{screen}\cdot2}{DAU}$ | 0.04 | см. допущение 8 |
+| Среднее число start / stop записи на 1 пользователя в день | $A_{rec/user}=\dfrac{DU_{screen}\cdot2}{DAU}$ | 0.04 | см. допущение 9 |
 
-**Допущения к таблице:**
-4. На одного активного voice-user принято **2 voice sessions/day**, то есть один join и один leave на каждую сессию.  
-5. На одного активного voice-user принято **4 mute/unmute действия в день**.  
-6. На одного активного camera-user принято **2 camera on/off действия в день**.  
-7. На одного активного screenshare-user принято **2 actions/day**: start и stop.  
-8. Для MVP с записью звонков принято, что **screenshare-сессия записывается в облако**, поэтому для recording control взята та же частота действий, что и для screenshare.
+**Допущения к продуктовым метрикам:**
+1. Для Discord-like сервиса принято, что в течение дня **20% DAU** заходят в голосовые комнаты, **4% DAU** включают камеру и **2% DAU** запускают скринкаст.
+2. Средняя длительность использования принята как **40 минут** для голосовых комнат, **20 минут** для camera-video и **15 минут** для screenshare.
+3. Прокси **DAU / MAU = 0.45** взят из Discord: **90M+ DAU** и **200M+ MAU**.
+4. Для хранения принято, что запись создаётся для каждой screenshare-сессии и хранится в облаке.
+5. На одного активного пользователя голосовых комнат принято **2 сессии в день**.
+6. На одного активного пользователя голосовых комнат принято **4 действия mute / unmute в день**.
+7. На одного активного пользователя с камерой принято **2 действия camera on / off в день**.
+8. На одного активного пользователя со скринкастом принято **2 действия в день**: start и stop.
+9. Для MVP принято, что управление записью звонка по частоте действий совпадает с управлением screenshare.
 
----
-
-### Средний размер хранилища на 1 пользователя в месяц
-
-> Здесь считается **месячный прирост хранения на 1 MAU**, а не весь исторический объём. Существенным блоком хранения для MVP является именно **cloud recording**.
-
-| Тип данных | Формула | Штук / user / month | GB / user / month | Источник / комментарий |
-|---|---|---:|---:|---|
-| Recording sessions | $N_{rec/user}=\dfrac{DAU}{MAU}\cdot2\%\cdot30=0.45\cdot0.02\cdot30$ | 0.27 | — | рассчитано из DAU/MAU и daily screenshare share |
-| Audio inside recordings | $S_{audio/user}=0.27\cdot\dfrac{84.6\ \text{kbit/s}\cdot15\cdot60}{8\cdot10^6}$ | 0.27 | 0.0026 | bitrate аудио взят из Discord voice proxy [^8] |
-| Screen video inside recordings | $S_{video/user}=0.27\cdot\dfrac{2.67\ \text{Mbit/s}\cdot15\cdot60}{8\cdot10^3}$ | 0.27 | 0.0811 | bitrate видео взят как 720p proxy из LiveKit benchmark [^9] |
-| **Итого cloud recordings** | $S_{total/user}=0.0026+0.0811$ | **0.27** | **0.0837** | **83.7 MB / user / month** |
-
-**Допущения к таблице:**
-9. Для расчёта хранения принят сценарий, что запись хранится для **каждой screenshare-сессии**.  
-10. Для видеочасти записи screenshare принят тот же bitrate, что и для опубликованного **720p stream** в benchmark LiveKit, потому что отдельной метрики для screenshare в источнике нет.  
-11. Профили пользователей, роли, channel metadata и moderation-логи не вынесены в storage-table, потому что для такого MVP их объём на порядки меньше медиазаписей.
-
----
-
-### Размер хранения по типам данных (месячный прирост)
-
-| Тип данных | Формула | Штук / month | TB / month | Источник / комментарий |
-|---|---|---:|---:|---|
-| Audio inside recordings | $N_{rec}=DU_{screen}\cdot30=11{,}016\cdot30$ | 330,469 | 3.15 | рассчитано из daily screenshare users и audio bitrate [^8] |
-| Screen video inside recordings | $N_{rec}=DU_{screen}\cdot30=11{,}016\cdot30$ | 330,469 | 99.26 | рассчитано из daily screenshare users и video bitrate [^9] |
-| **Итого cloud recordings** | — | **330,469** | **102.41** | сумма двух строк выше |
-
-**Комментарий к таблице:**  
-Поскольку в задании не задан retention policy, в таблице показан **месячный прирост хранилища**, а не накопленный storage за всё время работы сервиса.
-
----
-
-### Concurrency-метрики
+### Технические метрики
 
 | Метрика | Формула | Значение | Источник / комментарий |
 |---|---|---:|---|
-| Average voice CCU | $CCU_{voice,avg}=\dfrac{DU_{voice}\cdot40}{1440}$ | 3,060 | рассчитано из $DU_{voice}$ и $T_{voice}$ |
-| Peak voice CCU | $CCU_{voice,peak}=CCU_{voice,avg}\cdot3$ | 9,180 | рассчитано из $k_{peak}$ |
-| Average camera CCU | $CCU_{camera,avg}=\dfrac{DU_{camera}\cdot20}{1440}$ | 306 | рассчитано из $DU_{camera}$ и $T_{camera}$ |
-| Peak camera CCU | $CCU_{camera,peak}=CCU_{camera,avg}\cdot3$ | 918 | рассчитано из $k_{peak}$ |
-| Average screenshare CCU | $CCU_{screen,avg}=\dfrac{DU_{screen}\cdot15}{1440}$ | 115 | рассчитано из $DU_{screen}$ и $T_{screen}$ |
-| Peak screenshare CCU | $CCU_{screen,peak}=CCU_{screen,avg}\cdot3$ | 344 | рассчитано из $k_{peak}$ |
-
-**Комментарий к таблице:**  
-Эта таблица нужна как промежуточный шаг: именно через CCU считаются media traffic и требования к сети.
-
----
-
-### Сетевой трафик
-
-| Тип трафика | Формула | Суточный объём (GB/day) | Средняя скорость (Gbit/s) | Пиковая скорость (Gbit/s) | Источник / комментарий |
-|---|---|---:|---:|---:|---|
-| Voice egress | $V_{voice,avg}=CCU_{voice,avg}\cdot84.6\ \text{kbit/s}$ | 2,795.8 | 0.259 | 0.777 | audio proxy из Discord: 2.6M concurrent users и >220 Gbit/s [^8] |
-| Camera ingress | $V_{cam,in}=CCU_{camera,avg}\cdot2.67\ \text{Mbit/s}$ | 8,823.5 | 0.817 | 2.451 | LiveKit 720p ingress proxy [^9] |
-| Camera egress | $V_{cam,out}=CCU_{camera,avg}\cdot4.96\ \text{Mbit/s}$ | 16,391.3 | 1.518 | 4.553 | LiveKit 720p egress proxy [^9] |
-| Screenshare ingress | $V_{scr,in}=CCU_{screen,avg}\cdot2.67\ \text{Mbit/s}$ | 3,308.8 | 0.306 | 0.919 | см. допущение 10 |
-| Screenshare egress | $V_{scr,out}=CCU_{screen,avg}\cdot4.96\ \text{Mbit/s}$ | 6,146.7 | 0.569 | 1.707 | см. допущение 10 |
-| **Total ingress** | $V_{in}=V_{cam,in}+V_{scr,in}$ | **12,132.4** | **1.123** | **3.370** | сумма ingress-строк |
-| **Total egress** | $V_{out}=V_{voice}+V_{cam,out}+V_{scr,out}$ | **25,333.8** | **2.346** | **7.037** | сумма egress-строк |
-| **Total traffic** | $V_{total}=V_{in}+V_{out}$ | **37,466.1** | **3.469** | **10.407** | суммарный media traffic |
-
-**Комментарий к таблице:**  
-В traffic-table учитывается только **существенный media-plane traffic**: voice, camera-video и screenshare. Signaling-трафик не включён, потому что по объёму он значительно меньше RTP/media потока.
-
----
-
-### RPS по основным типам запросов
-
-| Тип запроса | Формула | Действий / day | Среднее RPS | Пиковое RPS | Источник / комментарий |
-|---|---|---:|---:|---:|---|
-| JoinVoiceRoom | $RPS_{join}=\dfrac{DU_{voice}\cdot2}{86{,}400}$ | 220,313 | 2.55 | 7.65 | см. допущение 4 |
-| LeaveVoiceRoom | $RPS_{leave}=\dfrac{DU_{voice}\cdot2}{86{,}400}$ | 220,313 | 2.55 | 7.65 | см. допущение 4 |
-| MuteUnmute | $RPS_{mute}=\dfrac{DU_{voice}\cdot4}{86{,}400}$ | 440,626 | 5.10 | 15.30 | см. допущение 5 |
-| ToggleCamera | $RPS_{camera}=\dfrac{DU_{camera}\cdot2}{86{,}400}$ | 44,063 | 0.51 | 1.53 | см. допущение 6 |
-| StartStopScreenshare | $RPS_{screen}=\dfrac{DU_{screen}\cdot2}{86{,}400}$ | 22,031 | 0.25 | 0.76 | см. допущение 7 |
-| StartStopRecording | $RPS_{rec}=\dfrac{DU_{screen}\cdot2}{86{,}400}$ | 22,031 | 0.25 | 0.76 | см. допущение 8 |
-| **Total signaling** | — | **969,407** | **11.22** | **33.66** | сумма строк выше |
-
-**Комментарий к таблице:**  
-RPS считается только для основных control-plane действий MVP: join/leave room, mute/unmute, camera toggle, screenshare control и recording control.
-
+| Размер хранения: записи звонков, шт/мес | $N_{rec}=DU_{screen}\cdot30=11{,}016\cdot30$ | 330,469 | рассчитано из daily screenshare users |
+| Размер хранения: аудио в записях, ТБ/мес | $V_{audio}=330{,}469\cdot\dfrac{84.6\ \text{kbit/s}\cdot15\cdot60}{8\cdot10^{12}}$ | 3.15 | на основе Discord voice traffic [^8] |
+| Размер хранения: видео скринкаста в записях, ТБ/мес | $V_{video}=330{,}469\cdot\dfrac{2.67\ \text{Mbit/s}\cdot15\cdot60}{8\cdot10^6}$ | 99.26 | на основе LiveKit 720p benchmark [^9] |
+| Размер хранения: всего, ТБ/мес | $V_{total}=3.15+99.26$ | 102.41 | сумма двух строк выше |
+| Сетевой трафик: голос, ГБ/сут | $V_{voice/day}=\dfrac{CCU_{voice}\cdot84.6\ \text{kbit/s}\cdot86{,}400}{8\cdot10^6}$ | 2,795.8 | $CCU_{voice}=\dfrac{DU_{voice}\cdot40}{1440}$ |
+| Сетевой трафик: голос, пик, Гбит/с | $B_{voice,peak}=3\cdot\dfrac{CCU_{voice}\cdot84.6}{10^6}$ | 0.777 | на основе Discord voice traffic [^8] |
+| Сетевой трафик: видео с камеры, ГБ/сут | $V_{cam/day}=\dfrac{CCU_{camera}\cdot(2.67+4.96)\cdot86{,}400}{8\cdot10^3}$ | 25,214.8 | $CCU_{camera}=\dfrac{DU_{camera}\cdot20}{1440}$ |
+| Сетевой трафик: видео с камеры, пик, Гбит/с | $B_{cam,peak}=3\cdot\dfrac{CCU_{camera}\cdot(2.67+4.96)}{10^3}$ | 7.004 | на основе LiveKit 720p benchmark [^9] |
+| Сетевой трафик: скринкаст, ГБ/сут | $V_{screen/day}=\dfrac{CCU_{screen}\cdot(2.67+4.96)\cdot86{,}400}{8\cdot10^3}$ | 9,454.5 | $CCU_{screen}=\dfrac{DU_{screen}\cdot15}{1440}$ |
+| Сетевой трафик: скринкаст, пик, Гбит/с | $B_{screen,peak}=3\cdot\dfrac{CCU_{screen}\cdot(2.67+4.96)}{10^3}$ | 2.626 | для screenshare принят тот же 720p proxy, что и для video stream |
+| Сетевой трафик: всего, ГБ/сут | $V_{traffic/day}=2{,}795.8+25{,}214.8+9{,}454.5$ | 37,465.1 | сумма трёх строк выше |
+| Сетевой трафик: всего, пик, Гбит/с | $B_{traffic,peak}=0.777+7.004+2.626$ | 10.407 | сумма трёх строк выше |
+| Запросы в секунду: вход в голосовую комнату, среднее RPS | $RPS_{join}=\dfrac{DU_{voice}\cdot2}{86{,}400}$ | 2.55 | см. допущение 5 |
+| Запросы в секунду: вход в голосовую комнату, пиковое RPS | $RPS_{join,peak}=3\cdot2.55$ | 7.65 | см. допущение 3 |
+| Запросы в секунду: выход из голосовой комнаты, среднее RPS | $RPS_{leave}=\dfrac{DU_{voice}\cdot2}{86{,}400}$ | 2.55 | см. допущение 5 |
+| Запросы в секунду: выход из голосовой комнаты, пиковое RPS | $RPS_{leave,peak}=3\cdot2.55$ | 7.65 | см. допущение 3 |
+| Запросы в секунду: mute / unmute, среднее RPS | $RPS_{mute}=\dfrac{DU_{voice}\cdot4}{86{,}400}$ | 5.10 | см. допущение 6 |
+| Запросы в секунду: mute / unmute, пиковое RPS | $RPS_{mute,peak}=3\cdot5.10$ | 15.30 | см. допущение 3 |
+| Запросы в секунду: camera on / off, среднее RPS | $RPS_{camera}=\dfrac{DU_{camera}\cdot2}{86{,}400}$ | 0.51 | см. допущение 7 |
+| Запросы в секунду: camera on / off, пиковое RPS | $RPS_{camera,peak}=3\cdot0.51$ | 1.53 | см. допущение 3 |
+| Запросы в секунду: start / stop скринкаста, среднее RPS | $RPS_{screen}=\dfrac{DU_{screen}\cdot2}{86{,}400}$ | 0.25 | см. допущение 8 |
+| Запросы в секунду: start / stop скринкаста, пиковое RPS | $RPS_{screen,peak}=3\cdot0.25$ | 0.76 | см. допущение 3 |
+| Запросы в секунду: start / stop записи, среднее RPS | $RPS_{rec}=\dfrac{DU_{screen}\cdot2}{86{,}400}$ | 0.25 | см. допущение 9 |
+| Запросы в секунду: start / stop записи, пиковое RPS | $RPS_{rec,peak}=3\cdot0.25$ | 0.76 | см. допущение 3 |
+| Запросы в секунду: всего, среднее RPS | — | 11.22 | сумма строк выше |
+| Запросы в секунду: всего, пиковое RPS | — | 33.66 | сумма строк выше |
 
 ---
 
