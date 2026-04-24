@@ -16,6 +16,8 @@
 
 ## 1. Тема, аудитория, функционал
 
+Доп. обоснования: [`archive/01-topic-audience.md`](archive/01-topic-audience.md).
+
 | Пункт | Значение |
 |---|---|
 | Тема | Высоконагруженный сервис голосовых/видео-звонков уровня Discord/Zoom |
@@ -38,7 +40,7 @@
 
 ## 2. Расчет нагрузки
 
-Детальные формулы вынесены в отдельный файл: [`docs/calculations.md`](docs/calculations.md).
+Детальные формулы вынесены в отдельные файлы: [`docs/calculations.md`](docs/calculations.md), [`archive/02-load-calculation.md`](archive/02-load-calculation.md).
 
 ### Производные метрики
 
@@ -72,6 +74,8 @@
 
 ## 3. Глобальная балансировка нагрузки
 
+Доп. обоснования: [`archive/03-global-balancing.md`](archive/03-global-balancing.md).
+
 ### География и покрытие
 
 | Параметр | Значение |
@@ -104,6 +108,8 @@ flowchart LR
 
 ## 4. Локальная балансировка нагрузки
 
+Доп. расчеты и обоснования: [`archive/04-local-balancing.md`](archive/04-local-balancing.md).
+
 | Слой | Технология | Что балансируется |
 |---|---|---|
 | L4 | Maglev / Envoy L4 / IPVS | UDP media (RTP/RTCP/DTLS) |
@@ -128,16 +134,25 @@ flowchart TD
 
 ## 5. Логическая схема БД
 
-```mermaid
-erDiagram
-    USERS ||--o{ SESSIONS : has
-    USERS ||--o{ SERVERS : owns
-    USERS ||--o{ ROOM_PARTICIPANTS : joins
-    SERVERS ||--o{ ROOMS : contains
-    ROOMS ||--o{ ROOM_PARTICIPANTS : has
-    ROOMS ||--o{ MESSAGES : has
-    ROOMS ||--o{ RECORDINGS : has
-```
+Схема в этом разделе взята с первой страницы PDF: [`docs/system_design.pdf`](docs/system_design.pdf) (изображение: `docs/system_design_page1.png`).
+
+DBML-код логической схемы для редактирования в [dbdiagram](https://dbdiagram.io/): [`db/database-sql.md`](db/database-sql.md) (интерактивная ссылка: [dbdiagram](https://dbdiagram.io/d/69eba36dc6a36f9c1b72a252)).
+
+PDF-версия system design: [`docs/system_design.pdf`](docs/system_design.pdf).
+
+Доп. обоснования: [`archive/05-logical-db.md`](archive/05-logical-db.md).
+
+| DB-домен | Ключевые сущности | Нагрузка |
+|---|---|---|
+| Auth/Identity | `users`, `sessions` | high read, medium write |
+| Community | `servers`, `rooms` | high read, medium write |
+| Realtime | `room_participants`, `presence` | very high read/write |
+| Messaging | `messages`, `message_reactions` | high read/write |
+| Media/Analytics | `recordings`, `analytics_events` | medium + async high write |
+
+Логическая схема:
+
+![Логическая схема БД](docs/system_design_page1.png)
 
 ### Сущности и нагрузки
 
@@ -153,6 +168,14 @@ erDiagram
 | `analytics_events` | Технические/продуктовые события | very high | medium | eventual |
 
 ## 6. Физическая схема БД
+
+Доп. обоснования: [`archive/06-physical-db.md`](archive/06-physical-db.md).
+
+| Проекция | Ключ | Основные сценарии |
+|---|---|---|
+| Room-centric | `room_id` | send/history/fan-out |
+| User-centric | `user_id` | session/presence/user-feed |
+| Time-centric | `event_time` | аналитика/отчеты |
 
 | Данные | Хранилище | Ключ/индексы | Шардирование | Репликация |
 |---|---|---|---|---|
@@ -173,6 +196,8 @@ erDiagram
 | S3 | versioning + lifecycle |
 
 ## 7. Алгоритмы
+
+Доп. обоснования: [`archive/07-algorithms.md`](archive/07-algorithms.md).
 
 | Алгоритм | Где используется | Цель |
 |---|---|---|
@@ -198,6 +223,8 @@ sequenceDiagram
 
 ## 8. Технологии
 
+Доп. обоснования: [`archive/08-technologies.md`](archive/08-technologies.md).
+
 | Слой | Технологии |
 |---|---|
 | Clients | Web (TS/React), Desktop (Tauri/Electron), Mobile (Flutter/Kotlin/Swift) |
@@ -208,6 +235,8 @@ sequenceDiagram
 | Infra | Kubernetes, Nginx/Envoy, Prometheus, Grafana, Loki, Jaeger |
 
 ## 9. Обеспечение надежности
+
+Доп. сценарии и rationale: [`archive/09-reliability.md`](archive/09-reliability.md).
 
 | Компонент | Резервирование | Деградация при сбое |
 |---|---|---|
@@ -226,6 +255,8 @@ sequenceDiagram
 | Graceful degradation | отключение non-critical функций (записи/аналитика) |
 
 ## 10. Схема проекта
+
+Пояснения к блокам схемы: [`archive/10-project-scheme.md`](archive/10-project-scheme.md).
 
 ```mermaid
 graph TB
@@ -246,6 +277,8 @@ graph TB
 ```
 
 ## 11. Расчет ресурсов
+
+Детальный sizing: [`archive/11-resources-sizing.md`](archive/11-resources-sizing.md).
 
 ### Входные точки для sizing
 
