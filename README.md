@@ -136,6 +136,14 @@ flowchart TD
 
 Доп. обоснования: [`archive/05-logical-db.md`](archive/05-logical-db.md).
 
+| DB-домен | Ключевые сущности | Нагрузка |
+|---|---|---|
+| Auth/Identity | `users`, `sessions` | high read, medium write |
+| Community | `servers`, `rooms` | high read, medium write |
+| Realtime | `room_participants`, `presence` | very high read/write |
+| Messaging | `messages`, `message_reactions` | high read/write |
+| Media/Analytics | `recordings`, `analytics_events` | medium + async high write |
+
 ```mermaid
 erDiagram
     USERS ||--o{ SESSIONS : has
@@ -163,6 +171,12 @@ erDiagram
 ## 6. Физическая схема БД
 
 Доп. обоснования: [`archive/06-physical-db.md`](archive/06-physical-db.md).
+
+| Проекция | Ключ | Основные сценарии |
+|---|---|---|
+| Room-centric | `room_id` | send/history/fan-out |
+| User-centric | `user_id` | session/presence/user-feed |
+| Time-centric | `event_time` | аналитика/отчеты |
 
 | Данные | Хранилище | Ключ/индексы | Шардирование | Репликация |
 |---|---|---|---|---|
