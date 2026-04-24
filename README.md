@@ -294,3 +294,16 @@ graph TB
 10. https://blog.nginx.org/blog/testing-the-performance-of-nginx-and-nginx-plus-web-servers
 11. https://aerospike.com/blog/new-aerospike-benchmark-demonstrates-real-time-performance-at-petabyte-scale/
 12. https://map.datacente.rs/
+
+[1]: https://helplama.com/discord-statistics/
+[2]: https://www.demandsage.com/discord-statistics/
+[3]: https://venturebeat.com/business/discord-crosses-250-million-users-as-it-hits-4-year-anniversary/
+[4]: https://www.cloudwards.net/discord-statistics/
+[5]: https://thesmallbusinessblog.com/how-many-discord-servers-are-there/
+[6]: https://www.similarweb.com/website/discord.com/#geography
+[7]: https://www.reuters.com/article/us-zoom-video-commn-encryption/zoom-says-it-has-300-million-daily-meeting-participants-not-users-idUSKBN22C1T4
+[8]: https://library.zoom.com/admin-corner/network-management/quality-of-service-and-network-best-practices-explainer/calculating-bandwidth-usage-for-zoom-meetings-and-phone
+[9]: https://habr.com/ru/articles/423171/
+[10]: https://blog.nginx.org/blog/testing-the-performance-of-nginx-and-nginx-plus-web-servers
+[11]: https://aerospike.com/blog/new-aerospike-benchmark-demonstrates-real-time-performance-at-petabyte-scale/
+[12]: https://map.datacente.rs/
