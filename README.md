@@ -72,16 +72,13 @@
 
 ## 3. Глобальная балансировка нагрузки
 
-### География трафика (discord.com)
+### География и покрытие
 
-| Страна | Доля | Источник |
-|---|---:|---|
-| США | 24.27% | [6] |
-| Бразилия | 5.84% | [6] |
-| Индия | 5.18% | [6] |
-| Канада | 3.22% | [6] |
-| Филиппины | 3.06% | [6] |
-| Прочие | 58.43% | расчет из таблицы |
+| Параметр | Значение |
+|---|---|
+| Подход | Региональное разнесение DC для минимизации RTT в voice/video |
+| Основание выбора регионов | Концентрация аудитории Discord в NA/EU/APAC + наличие крупных DC |
+| Тип распределения | Проектное допущение (без использования SimilarWeb) |
 
 ### Размещение регионов
 
@@ -287,7 +284,7 @@ graph TB
 3. https://venturebeat.com/business/discord-crosses-250-million-users-as-it-hits-4-year-anniversary/
 4. https://www.cloudwards.net/discord-statistics/
 5. https://thesmallbusinessblog.com/how-many-discord-servers-are-there/
-6. https://www.similarweb.com/website/discord.com/#geography
+6. https://map.datacente.rs/
 7. https://www.reuters.com/article/us-zoom-video-commn-encryption/zoom-says-it-has-300-million-daily-meeting-participants-not-users-idUSKBN22C1T4
 8. https://library.zoom.com/admin-corner/network-management/quality-of-service-and-network-best-practices-explainer/calculating-bandwidth-usage-for-zoom-meetings-and-phone
 9. https://habr.com/ru/articles/423171/
@@ -300,7 +297,7 @@ graph TB
 [3]: https://venturebeat.com/business/discord-crosses-250-million-users-as-it-hits-4-year-anniversary/
 [4]: https://www.cloudwards.net/discord-statistics/
 [5]: https://thesmallbusinessblog.com/how-many-discord-servers-are-there/
-[6]: https://www.similarweb.com/website/discord.com/#geography
+[6]: https://map.datacente.rs/
 [7]: https://www.reuters.com/article/us-zoom-video-commn-encryption/zoom-says-it-has-300-million-daily-meeting-participants-not-users-idUSKBN22C1T4
 [8]: https://library.zoom.com/admin-corner/network-management/quality-of-service-and-network-best-practices-explainer/calculating-bandwidth-usage-for-zoom-meetings-and-phone
 [9]: https://habr.com/ru/articles/423171/

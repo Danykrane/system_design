@@ -38,7 +38,7 @@
 3. https://venturebeat.com/business/discord-crosses-250-million-users-as-it-hits-4-year-anniversary/
 4. https://www.cloudwards.net/discord-statistics/
 5. https://thesmallbusinessblog.com/how-many-discord-servers-are-there/
-6. https://www.similarweb.com/website/discord.com/#geography
+6. https://map.datacente.rs/
 7. https://www.reuters.com/article/us-zoom-video-commn-encryption/zoom-says-it-has-300-million-daily-meeting-participants-not-users-idUSKBN22C1T4
 8. https://library.zoom.com/admin-corner/network-management/quality-of-service-and-network-best-practices-explainer/calculating-bandwidth-usage-for-zoom-meetings-and-phone
 9. https://habr.com/ru/articles/423171/
@@ -48,7 +48,7 @@
 [3]: https://venturebeat.com/business/discord-crosses-250-million-users-as-it-hits-4-year-anniversary/
 [4]: https://www.cloudwards.net/discord-statistics/
 [5]: https://thesmallbusinessblog.com/how-many-discord-servers-are-there/
-[6]: https://www.similarweb.com/website/discord.com/#geography
+[6]: https://map.datacente.rs/
 [7]: https://www.reuters.com/article/us-zoom-video-commn-encryption/zoom-says-it-has-300-million-daily-meeting-participants-not-users-idUSKBN22C1T4
 [8]: https://library.zoom.com/admin-corner/network-management/quality-of-service-and-network-best-practices-explainer/calculating-bandwidth-usage-for-zoom-meetings-and-phone
 [9]: https://habr.com/ru/articles/423171/
