@@ -16,6 +16,8 @@
 
 ## 1. Тема, аудитория, функционал
 
+Доп. обоснования: [`archive/01-topic-audience.md`](archive/01-topic-audience.md).
+
 | Пункт | Значение |
 |---|---|
 | Тема | Высоконагруженный сервис голосовых/видео-звонков уровня Discord/Zoom |
@@ -38,7 +40,7 @@
 
 ## 2. Расчет нагрузки
 
-Детальные формулы вынесены в отдельный файл: [`docs/calculations.md`](docs/calculations.md).
+Детальные формулы вынесены в отдельные файлы: [`docs/calculations.md`](docs/calculations.md), [`archive/02-load-calculation.md`](archive/02-load-calculation.md).
 
 ### Производные метрики
 
@@ -72,6 +74,8 @@
 
 ## 3. Глобальная балансировка нагрузки
 
+Доп. обоснования: [`archive/03-global-balancing.md`](archive/03-global-balancing.md).
+
 ### География и покрытие
 
 | Параметр | Значение |
@@ -104,6 +108,8 @@ flowchart LR
 
 ## 4. Локальная балансировка нагрузки
 
+Доп. расчеты и обоснования: [`archive/04-local-balancing.md`](archive/04-local-balancing.md).
+
 | Слой | Технология | Что балансируется |
 |---|---|---|
 | L4 | Maglev / Envoy L4 / IPVS | UDP media (RTP/RTCP/DTLS) |
@@ -127,6 +133,8 @@ flowchart TD
 ```
 
 ## 5. Логическая схема БД
+
+Доп. обоснования: [`archive/05-logical-db.md`](archive/05-logical-db.md).
 
 ```mermaid
 erDiagram
@@ -154,6 +162,8 @@ erDiagram
 
 ## 6. Физическая схема БД
 
+Доп. обоснования: [`archive/06-physical-db.md`](archive/06-physical-db.md).
+
 | Данные | Хранилище | Ключ/индексы | Шардирование | Репликация |
 |---|---|---|---|---|
 | `users`, `servers`, `rooms` | PostgreSQL | PK, `email`, `owner_id` | Citus hash by `id` | 1 primary + 2 replicas |
@@ -173,6 +183,8 @@ erDiagram
 | S3 | versioning + lifecycle |
 
 ## 7. Алгоритмы
+
+Доп. обоснования: [`archive/07-algorithms.md`](archive/07-algorithms.md).
 
 | Алгоритм | Где используется | Цель |
 |---|---|---|
@@ -198,6 +210,8 @@ sequenceDiagram
 
 ## 8. Технологии
 
+Доп. обоснования: [`archive/08-technologies.md`](archive/08-technologies.md).
+
 | Слой | Технологии |
 |---|---|
 | Clients | Web (TS/React), Desktop (Tauri/Electron), Mobile (Flutter/Kotlin/Swift) |
@@ -208,6 +222,8 @@ sequenceDiagram
 | Infra | Kubernetes, Nginx/Envoy, Prometheus, Grafana, Loki, Jaeger |
 
 ## 9. Обеспечение надежности
+
+Доп. сценарии и rationale: [`archive/09-reliability.md`](archive/09-reliability.md).
 
 | Компонент | Резервирование | Деградация при сбое |
 |---|---|---|
@@ -226,6 +242,8 @@ sequenceDiagram
 | Graceful degradation | отключение non-critical функций (записи/аналитика) |
 
 ## 10. Схема проекта
+
+Пояснения к блокам схемы: [`archive/10-project-scheme.md`](archive/10-project-scheme.md).
 
 ```mermaid
 graph TB
@@ -246,6 +264,8 @@ graph TB
 ```
 
 ## 11. Расчет ресурсов
+
+Детальный sizing: [`archive/11-resources-sizing.md`](archive/11-resources-sizing.md).
 
 ### Входные точки для sizing
 
