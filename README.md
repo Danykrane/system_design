@@ -1,4 +1,3 @@
-# Highload VK Education  
 ## Discord/Zoom-подобные голосовые и видео-звонки (WebRTC + SFU)
 
 ## Содержание
