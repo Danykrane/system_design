@@ -1,164 +1,297 @@
-Discord‑подобные голос/видео‑звонки (WebRTC + SFU)
+# Highload VK Education  
+## Discord/Zoom-подобные голосовые и видео-звонки (WebRTC + SFU)
 
----
-## Часть 1. Тема и целевая аудитория
+## Содержание
+- [1. Тема, аудитория, функционал](#1-тема-аудитория-функционал)
+- [2. Расчет нагрузки](#2-расчет-нагрузки)
+- [3. Глобальная балансировка нагрузки](#3-глобальная-балансировка-нагрузки)
+- [4. Локальная балансировка нагрузки](#4-локальная-балансировка-нагрузки)
+- [5. Логическая схема БД](#5-логическая-схема-бд)
+- [6. Физическая схема БД](#6-физическая-схема-бд)
+- [7. Алгоритмы](#7-алгоритмы)
+- [8. Технологии](#8-технологии)
+- [9. Обеспечение надежности](#9-обеспечение-надежности)
+- [10. Схема проекта](#10-схема-проекта)
+- [11. Расчет ресурсов](#11-расчет-ресурсов)
+- [Список источников](#список-источников)
 
-**Проект:** Discord-клон для Австралии
+## 1. Тема, аудитория, функционал
 
-**Тип сервиса:** Discord-клон платформа для общения в сообществах, где основная нагрузка создаётся групповыми видео-совещаниями, голосовыми каналами и скринкастом экрана, а текстовые каналы служат для координации общения.
+| Пункт | Значение |
+|---|---|
+| Тема | Высоконагруженный сервис голосовых/видео-звонков уровня Discord/Zoom |
+| Ключевая модель | WebRTC + SFU (селективная пересылка медиапотоков) |
+| Ключевой MVP | auth, community/server, text chat, voice/video room, invite link, запись звонка |
+| Основной приоритет | Низкая задержка аудио/видео и масштабирование голосовых комнат |
 
-**Функционал MVP:**
+### Базовые продуктовые метрики (только подтвержденные)
 
-1. голосовые каналы (общение голосом при подключении к комнате);
-2. групповые видео;
-3. запуск скринкастов для гейм стриминга;
-4. запись звонков и сохранение в облаке;
-5. роли и разрешения (для модерации внутри канала: удаление из комнаты, выключение камеры/микрофона).
+| Метрика | Значение | Источник |
+|---|---:|---|
+| MAU | 150,000,000 | [helplama.com/discord-statistics](https://helplama.com/discord-statistics/) |
+| DAU | 29,000,000 | [helplama.com/discord-statistics](https://helplama.com/discord-statistics/) |
+| Зарегистрированные пользователи | 600,000,000 | [demandsage.com/discord-statistics](https://www.demandsage.com/discord-statistics/) |
+| Сообщений в день | 850,000,000 | [venturebeat.com](https://venturebeat.com/business/discord-crosses-250-million-users-as-it-hits-4-year-anniversary/) |
+| Минут голосовых разговоров в день | 4,000,000,000 | [cloudwards.net/discord-statistics](https://www.cloudwards.net/discord-statistics/) |
+| Пиковый concurrent users | 8,200,000 | [cloudwards.net/discord-statistics](https://www.cloudwards.net/discord-statistics/) |
+| Количество сообществ | 19,000,000+ | [thesmallbusinessblog.com](https://thesmallbusinessblog.com/how-many-discord-servers-are-there/) |
+| Zoom daily meeting participants | 300,000,000 | [reuters.com](https://www.reuters.com/article/us-zoom-video-commn-encryption/zoom-says-it-has-300-million-daily-meeting-participants-not-users-idUSKBN22C1T4) |
 
-**Аналоги на рынке (глобальные):**
+## 2. Расчет нагрузки
 
-1. Discord ~ 200 млн MAU [^1] и 90 млн DAU [^5] (Отношение MAU/DAU ~ 0.45)
-2. Microsoft Teams ~ 320 млн MAU [^4]
+Детальные формулы вынесены в отдельный файл: [`docs/calculations.md`](docs/calculations.md).
 
+### Производные метрики
 
-**Выбранный регион**
-В процессе выбора локации была выбрана Австралия.
+| Метрика | Значение | Основание |
+|---|---:|---|
+| Сообщений на 1 DAU в день | 29.31 | D1 |
+| RPS отправки сообщений | 9,838 RPS | D2 |
+| Средний concurrent voice users | 2,777,778 | D3 |
+| Peak коэффициент voice-нагрузки | 2.95 | D4 |
+| Средний voice-трафик | ~235 Gbit/s | D6 |
+| Пиковый voice-трафик | ~694 Gbit/s | D7 |
+| RTP packets/s (20 ms packetization) | 138,888,889 packets/s | D8 |
+| RTCP reports/s (каждые 5 сек) | 555,556 reports/s | D9 |
+| RPS авторизации (1 вход/DAU/день) | 336 RPS | D10 |
 
-1) Пользуются интернетом в Австралии: 26.2 млн человек [^2]
-2) 82% Австралицев играют в игры [^3], а 77% играют в игры в компании [^3]
+### Профили видеоканала (для sizing, не расчет DAU-трафика)
 
-**TAM**
-Подсчет TAM (общий объем целевого рынка): 26.2 × 0.82 × 0.77 = 16.54 млн пользователей
+| Профиль Zoom Meeting | Upstream | Downstream | Источник |
+|---|---:|---:|---|
+| 720p | ~2.6 Mbit/s | ~1.8 Mbit/s | [library.zoom.com](https://library.zoom.com/admin-corner/network-management/quality-of-service-and-network-best-practices-explainer/calculating-bandwidth-usage-for-zoom-meetings-and-phone) |
+| 1080p | ~3.8 Mbit/s | ~3.0 Mbit/s | [library.zoom.com](https://library.zoom.com/admin-corner/network-management/quality-of-service-and-network-best-practices-explainer/calculating-bandwidth-usage-for-zoom-meetings-and-phone) |
 
-**Расчет MAU DAU (для Австралии)**
+### Сводная таблица RPS (API + media plane)
 
-Данных для Австралии по Mau и Dau нет, поэтому расчет этих метрик сделаем используя TAM и документ [^6].
+| Контур | Метрика | Avg | Peak |
+|---|---|---:|---:|
+| API plane | Auth RPS | 336 | 1,000 (буфер x3) |
+| API plane | Message write RPS | 9,838 | 29,514 (буфер x3) |
+| Media plane | RTP packets/s | 138,888,889 | 416,666,667 (буфер x3) |
+| Media plane | RTCP reports/s | 555,556 | 1,666,668 (буфер x3) |
 
-Из него получаем коэффициен проникновения сервиса (kServiseUse) ~ 7.4%:
-- Discord использовали 10% мужчин и 5% женщин среди австралийских взрослых [^6];
-- Распределение по полу: 49 % мужчины и 50 % женщины [^6]
+## 3. Глобальная балансировка нагрузки
 
-$k_{serviceUse}=0.49\cdot10\%+0.5\cdot5\%\approx7.4\%$
+### География трафика (discord.com)
 
+| Страна | Доля | Источник |
+|---|---:|---|
+| США | 24.27% | [similarweb.com/website/discord.com/#geography](https://www.similarweb.com/website/discord.com/#geography) |
+| Бразилия | 5.84% | [similarweb.com/website/discord.com/#geography](https://www.similarweb.com/website/discord.com/#geography) |
+| Индия | 5.18% | [similarweb.com/website/discord.com/#geography](https://www.similarweb.com/website/discord.com/#geography) |
+| Канада | 3.22% | [similarweb.com/website/discord.com/#geography](https://www.similarweb.com/website/discord.com/#geography) |
+| Филиппины | 3.06% | [similarweb.com/website/discord.com/#geography](https://www.similarweb.com/website/discord.com/#geography) |
+| Прочие | 58.43% | расчет из таблицы |
 
-Также данные: 
-- 84% взрослых использовали "messaging/calling apps" [^6];
-- 61% использовали "app voice calls" [^6];
-- среди аудитории 18–24 Discord использовали 39% респондентов[^6];
+### Размещение регионов
 
-**Расчет:**
-| Параметр | Формула | Значение |
-|---|---|---:|
-| TAM | — | 16,540,000 |
-| Коэффициент использования сервиса | $k_{serviceUse}=0.49\cdot10\%+0.5\cdot5\%\approx7.4\%$ | 7.4% |
-| Месячная активная аудитория (MAU) | $MAU=TAM\cdot k_{serviceUse}=16{,}540{,}000\cdot7.4\%=1{,}223{,}960$ | 1,223,960 |
-| Дневная активная аудитория (DAU) | $DAU=MAU\cdot0.45=1{,}223{,}960\cdot0.45=550{,}782$ | 550,782 |
+| Регион | Локации DC (пример) | Роль |
+|---|---|---|
+| NA | New York, Chicago, Los Angeles, Vancouver | API + SFU |
+| EU | London, Frankfurt, Warsaw | API + SFU |
+| APAC | Singapore, Tokyo, Mumbai, Manila | API + SFU |
+| LATAM | Sao Paulo | SFU + read-replica API |
 
+```mermaid
+flowchart LR
+    U[Client] --> DNS[GeoDNS / Latency DNS]
+    DNS --> NA[NA Region]
+    DNS --> EU[EU Region]
+    DNS --> APAC[APAC Region]
+    DNS --> LATAM[LATAM Region]
+    NA --> NALB[L4/L7]
+    EU --> EULB[L4/L7]
+    APAC --> APACLB[L4/L7]
+    LATAM --> LATAMLB[L4/L7]
+```
 
-## Часть 2. Расчёт нагрузки
+## 4. Локальная балансировка нагрузки
 
-### Продуктовые метрики
+| Слой | Технология | Что балансируется |
+|---|---|---|
+| L4 | Maglev / Envoy L4 / IPVS | UDP media (RTP/RTCP/DTLS) |
+| L7 | Nginx / Envoy | HTTPS, WSS signaling, API |
+| Application | Control Plane + SFU allocator | Назначение комнаты на SFU |
 
-| Метрика | Формула | Значение | Источник / комментарий |
-|---|---|---:|---|
-| Месячная аудитория (MAU) | — | 1,223,960 | из части 1 |
-| Дневная аудитория (DAU) | — | 550,782 | из части 1 |
-| Пользователи голосовых комнат в день | $DU_{voice}=DAU\cdot20\%=550{,}782\cdot0.20$ | 110,156 | проектное допущение 1 |
-| Пользователи с камерой в день | $DU_{camera}=DAU\cdot4\%=550{,}782\cdot0.04$ | 22,031 | проектное допущение 1 |
-| Пользователи со скринкастом в день | $DU_{screen}=DAU\cdot2\%=550{,}782\cdot0.02$ | 11,016 | проектное допущение 1 |
-| Средний размер хранения на 1 пользователя: записи звонков, шт/мес | $N_{rec/user}=\dfrac{DAU}{MAU}\cdot2\%\cdot30=0.45\cdot0.02\cdot30$ | 0.27 | запись привязана к screenshare; прокси $DAU/MAU=0.45$ взят из Discord [^1] [^5] |
-| Средний размер хранения на 1 пользователя: аудио в записях, ГБ/мес | $S_{audio/user}=0.27\cdot\dfrac{84.6\ \text{kbit/s}\cdot15\cdot60}{8\cdot10^6}$ | 0.0026 | на основе Discord voice traffic [^8] |
-| Средний размер хранения на 1 пользователя: видео скринкаста в записях, ГБ/мес | $S_{video/user}=0.27\cdot\dfrac{2.67\ \text{Mbit/s}\cdot15\cdot60}{8\cdot10^3}$ | 0.0811 | на основе LiveKit 720p benchmark [^9] |
-| Средний размер хранения на 1 пользователя: всего, ГБ/мес | $S_{total/user}=0.0026+0.0811$ | 0.0837 | 83.7 MB на пользователя в месяц |
-| Среднее число входов в голосовую комнату на 1 пользователя в день | $A_{join/user}=\dfrac{DU_{voice}\cdot2}{DAU}$ | 0.40 | проектное допущение 5 |
-| Среднее число выходов из голосовой комнаты на 1 пользователя в день | $A_{leave/user}=\dfrac{DU_{voice}\cdot2}{DAU}$ | 0.40 | проектное допущение 5 |
-| Среднее число mute / unmute на 1 пользователя в день | $A_{mute/user}=\dfrac{DU_{voice}\cdot4}{DAU}$ | 0.80 | проектное допущение 6 |
-| Среднее число camera on / off на 1 пользователя в день | $A_{camera/user}=\dfrac{DU_{camera}\cdot2}{DAU}$ | 0.08 | проектное допущение 7 |
-| Среднее число start / stop скринкаста на 1 пользователя в день | $A_{screen/user}=\dfrac{DU_{screen}\cdot2}{DAU}$ | 0.04 | проектное допущение 8 |
-| Среднее число start / stop записи на 1 пользователя в день | $A_{rec/user}=\dfrac{DU_{screen}\cdot2}{DAU}$ | 0.04 | проектное допущение 9 |
+| Контур | Резервирование | Формула |
+|---|---|---|
+| L7/API | N+1 | `N_total = N + 1` |
+| SFU pool | N+1 per region | `N_total = N + 1` |
+| Registry/State | RF=3 | `quorum >= 2` |
 
-### Технические метрики
+```mermaid
+flowchart TD
+    C[Client] --> G[GeoDNS]
+    G --> L7[L7 API Gateway]
+    L7 --> CP[Control Plane]
+    CP --> REG[(Room Registry)]
+    CP --> SFU[Assigned SFU]
+    C -. WebRTC/UDP .-> SFU
+```
 
-| Метрика | Формула | Значение | Источник / комментарий |
-|---|---|---:|---|
-| Размер хранения: записи звонков, шт/мес | $N_{rec}=DAU\cdot2\%\cdot30=550{,}782\cdot0.02\cdot30$ | 330,469 | рассчитано из числа пользователей со screenshare |
-| Размер хранения: аудио в записях, ТБ/мес | $V_{audio}=330{,}469\cdot\dfrac{84.6\ \text{kbit/s}\cdot15\cdot60}{8\cdot10^{12}}$ | 3.15 | на основе Discord voice traffic [^8] |
-| Размер хранения: видео скринкаста в записях, ТБ/мес | $V_{video}=330{,}469\cdot\dfrac{2.67\ \text{Mbit/s}\cdot15\cdot60}{8\cdot10^6}$ | 99.26 | на основе LiveKit 720p benchmark [^9] |
-| Размер хранения: всего, ТБ/мес | $V_{total}=3.15+99.26$ | 102.41 | сумма двух строк выше |
-| Сетевой трафик: голос, ГБ/сут | $V_{voice/day}=\dfrac{CCU_{voice}\cdot84.6\ \text{kbit/s}\cdot86{,}400}{8\cdot10^6}$ | 2,795.8 | $CCU_{voice}=\dfrac{DU_{voice}\cdot40}{1440}$; Discord voice traffic [^8] |
-| Сетевой трафик: голос, пик, Гбит/с | $B_{voice,peak}=3\cdot\dfrac{CCU_{voice}\cdot84.6}{10^6}$ | 0.777 | проектное допущение 3 + Discord voice traffic [^8] |
-| Сетевой трафик: камера, ГБ/сут | $V_{cam/day}=\dfrac{CCU_{camera}\cdot(2.67+4.96)\cdot86{,}400}{8\cdot10^3}$ | 25,214.8 | $CCU_{camera}=\dfrac{DU_{camera}\cdot20}{1440}$; LiveKit 720p benchmark [^9] |
-| Сетевой трафик: камера, пик, Гбит/с | $B_{cam,peak}=3\cdot\dfrac{CCU_{camera}\cdot(2.67+4.96)}{10^3}$ | 7.004 | проектное допущение 3 + LiveKit 720p benchmark [^9] |
-| Сетевой трафик: скринкаст, ГБ/сут | $V_{screen/day}=\dfrac{CCU_{screen}\cdot(2.67+4.96)\cdot86{,}400}{8\cdot10^3}$ | 9,455.5 | $CCU_{screen}=\dfrac{DU_{screen}\cdot15}{1440}$; для screenshare принят тот же 720p proxy, что и для video stream [^9] |
-| Сетевой трафик: скринкаст, пик, Гбит/с | $B_{screen,peak}=3\cdot\dfrac{CCU_{screen}\cdot(2.67+4.96)}{10^3}$ | 2.627 | проектное допущение 3 + LiveKit 720p benchmark [^9] |
-| Сетевой трафик: всего, ГБ/сут | $V_{traffic/day}=2{,}795.8+25{,}214.8+9{,}455.5$ | 37,466.1 | сумма трёх строк выше |
-| Сетевой трафик: всего, пик, Гбит/с | $B_{traffic,peak}=0.777+7.004+2.627$ | 10.408 | сумма трёх строк выше |
-| Запросы в секунду (RPS): вход в голосовую комнату, среднее | $RPS_{join}=\dfrac{DU_{voice}\cdot2}{86{,}400}$ | 2.55 | проектное допущение 5 |
-| Запросы в секунду (RPS): вход в голосовую комнату, пик | $RPS_{join,peak}=3\cdot2.55$ | 7.65 | проектное допущение 3 |
-| Запросы в секунду (RPS): выход из голосовой комнаты, среднее | $RPS_{leave}=\dfrac{DU_{voice}\cdot2}{86{,}400}$ | 2.55 | проектное допущение 5 |
-| Запросы в секунду (RPS): выход из голосовой комнаты, пик | $RPS_{leave,peak}=3\cdot2.55$ | 7.65 | проектное допущение 3 |
-| Запросы в секунду (RPS): mute / unmute, среднее | $RPS_{mute}=\dfrac{DU_{voice}\cdot4}{86{,}400}$ | 5.10 | проектное допущение 6 |
-| Запросы в секунду (RPS): mute / unmute, пик | $RPS_{mute,peak}=3\cdot5.10$ | 15.30 | проектное допущение 3 |
-| Запросы в секунду (RPS): camera on / off, среднее | $RPS_{camera}=\dfrac{DU_{camera}\cdot2}{86{,}400}$ | 0.51 | проектное допущение 7 |
-| Запросы в секунду (RPS): camera on / off, пик | $RPS_{camera,peak}=3\cdot0.51$ | 1.53 | проектное допущение 3 |
-| Запросы в секунду (RPS): start / stop скринкаста, среднее | $RPS_{screen}=\dfrac{DU_{screen}\cdot2}{86{,}400}$ | 0.25 | проектное допущение 8 |
-| Запросы в секунду (RPS): start / stop скринкаста, пик | $RPS_{screen,peak}=3\cdot0.25$ | 0.76 | проектное допущение 3 |
-| Запросы в секунду (RPS): start / stop записи, среднее | $RPS_{rec}=\dfrac{DU_{screen}\cdot2}{86{,}400}$ | 0.25 | проектное допущение 9 |
-| Запросы в секунду (RPS): start / stop записи, пик | $RPS_{rec,peak}=3\cdot0.25$ | 0.76 | проектное допущение 3 |
-| Запросы в секунду (RPS): всего, среднее | — | 11.22 | сумма строк выше |
-| Запросы в секунду (RPS): всего, пик | — | 33.66 | сумма строк выше |
+## 5. Логическая схема БД
 
-### Допущения и их обоснование
+```mermaid
+erDiagram
+    USERS ||--o{ SESSIONS : has
+    USERS ||--o{ SERVERS : owns
+    USERS ||--o{ ROOM_PARTICIPANTS : joins
+    SERVERS ||--o{ ROOMS : contains
+    ROOMS ||--o{ ROOM_PARTICIPANTS : has
+    ROOMS ||--o{ MESSAGES : has
+    ROOMS ||--o{ RECORDINGS : has
+```
 
-1. Для расчёта нагрузки приняты коэффициенты: 20% DAU используют голосовые комнаты, 4% DAU включают камеру, 2% DAU запускают скринкаст. Точных product-level долей для Discord-like сервиса в Австралии в открытых источниках нет, поэтому эти значения используются как проектные допущения. Они выбраны как консервативные на фоне более широких рыночных показателей: 84% взрослых использовали messaging/calling apps, 61% — app voice calls, 61% — app video calls, 58% — communication/social app для voice or video calls за последние 7 дней; среди аудитории 18–24 Discord использовали 39% за последние 6 месяцев, 26% за последние 7 дней и 18% — именно для video or voice calls [^6].
+### Сущности и нагрузки
 
-2. Средняя длительность использования принята как 40 минут для голосовых комнат, 20 минут для camera-video и 15 минут для screenshare. Для 40 минут есть внешняя опора: у бесплатных Zoom Meetings стандартный лимит встречи составляет 40 минут [^10]. Значения 20 и 15 минут являются консервативными производными допущениями для менее частых video/screenshare-сценариев.
+| Сущность | Назначение | Write path | Read path | Консистентность |
+|---|---|---|---|---|
+| `users` | Профиль и учетные данные | low | medium | strong |
+| `sessions` | Токены/сессии | medium | high | strong |
+| `servers` | Сообщества | low | medium | strong |
+| `rooms` | Voice/video комнаты | medium | high | strong |
+| `room_participants` | Участники активных комнат | very high | very high | eventual |
+| `messages` | Текстовые сообщения | high | high | eventual |
+| `recordings` | Метаданные записей | medium | medium | eventual |
+| `analytics_events` | Технические/продуктовые события | very high | medium | eventual |
 
-3. Коэффициент пика принят равным 3. Это проектное допущение для consumer-сервиса с вечерним пиком нагрузки.
+## 6. Физическая схема БД
 
-4. Для хранения принято, что запись создаётся для каждой screenshare-сессии и хранится в облаке. Это продуктовое решение MVP; cloud recording является стандартным сценарием у зрелых аналогов [^11].
+| Данные | Хранилище | Ключ/индексы | Шардирование | Репликация |
+|---|---|---|---|---|
+| `users`, `servers`, `rooms` | PostgreSQL | PK, `email`, `owner_id` | Citus hash by `id` | 1 primary + 2 replicas |
+| `sessions`, `room_registry` | Redis / Aerospike | key by `token`/`room_id` | hash by key | RF=3 |
+| `messages` | ScyllaDB / Aerospike | `(room_id, created_at)` | hash by `room_id` | RF=3 |
+| `analytics_events` | Kafka -> ClickHouse | `event_time`, `room_id` | partition by time | ReplicatedMergeTree |
+| `recordings` binary | S3 | object key | auto | cross-AZ |
 
-5. На одного активного пользователя голосовых комнат принято 2 сессии в день. Открытая Discord telemetry по количеству voice-room sessions/day на пользователя не публикуется, поэтому значение задаётся как консервативное проектное допущение.
+### Backup
 
-6. На одного активного пользователя голосовых комнат принято 4 действия mute / unmute в день. Внешние источники подтверждают наличие самого control в Discord, но не частоту его использования [^12] [^13].
+| Компонент | Политика |
+|---|---|
+| PostgreSQL | daily full + WAL |
+| Scylla/Aerospike | snapshots + restore drill |
+| ClickHouse | partition backup to S3 |
+| Redis | AOF/RDB + replica |
+| S3 | versioning + lifecycle |
 
-7. На одного активного пользователя с камерой принято 2 действия camera on / off в день. Источники подтверждают механику включения и выключения камеры в Discord, а частота задаётся как проектное допущение [^14] [^15].
+## 7. Алгоритмы
 
-8. На одного активного пользователя со скринкастом принято 2 действия в день: start и stop. Источник подтверждает сам сценарий Go Live / Screen Share, а частота определяется структурой одной screenshare-сессии [^16].
+| Алгоритм | Где используется | Цель |
+|---|---|---|
+| Weighted Rendezvous Hashing | Назначение room -> SFU | минимальный remap при failover |
+| Simulcast/SVC | Видеопотоки | адаптация качества под канал |
+| GCC (WebRTC congestion control) | Media transport | контроль bitrate/packet loss |
+| Jitter buffer + PLC | Аудио тракт | стабилизация звука |
+| Opus DTX | Аудио | снижение трафика в тишине |
+| NACK/PLI/FIR | Видео восстановление | устойчивость к packet loss |
 
-9. Для MVP принято, что частота управления записью совпадает с частотой управления screenshare. Это проектное допущение, так как запись рассматривается как связанный со screenshare пользовательский сценарий [^11].
----
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant AG as API Gateway
+    participant CP as Control Plane
+    participant SFU as SFU Node
+    U->>AG: Join(room_id)
+    AG->>CP: Resolve room_id
+    CP-->>AG: sfu_endpoint + token
+    AG-->>U: ICE/TURN + token
+    U->>SFU: DTLS/SRTP connect
+```
+
+## 8. Технологии
+
+| Слой | Технологии |
+|---|---|
+| Clients | Web (TS/React), Desktop (Tauri/Electron), Mobile (Flutter/Kotlin/Swift) |
+| Realtime | WebRTC, WebSocket, STUN/TURN |
+| Media | SFU (Rust/Go), Opus, VP8/VP9/H.264, Simulcast/SVC |
+| Backend | Go/Rust, gRPC, NATS/Kafka |
+| Data | PostgreSQL, ScyllaDB/Aerospike, Redis, ClickHouse, S3 |
+| Infra | Kubernetes, Nginx/Envoy, Prometheus, Grafana, Loki, Jaeger |
+
+## 9. Обеспечение надежности
+
+| Компонент | Резервирование | Деградация при сбое |
+|---|---|---|
+| API Gateway | N+1 | read-only сценарии для части API |
+| SFU pool | N+1 + room remap | reconnect на резервный SFU |
+| Redis/Aerospike registry | RF=3 | временное увеличение latency join |
+| PostgreSQL | primary + replicas | блок write-only функций при failover |
+| Kafka/ClickHouse | RF=3 + replay | временное отставание аналитики |
+| S3 recording | multi-AZ | задержка публикации записи |
+
+| Паттерн | Применение |
+|---|---|
+| Retry + exponential backoff | reconnect signaling/media |
+| Circuit breaker | межсервисные вызовы |
+| Graceful shutdown | rolling updates без обрыва звонков |
+| Graceful degradation | отключение non-critical функций (записи/аналитика) |
+
+## 10. Схема проекта
+
+```mermaid
+graph TB
+    U[Web/Mobile/Desktop] --> DNS[GeoDNS]
+    DNS --> EDGE[L4/L7 Edge]
+    EDGE --> API[API + Signaling]
+    API --> CP[Control Plane]
+    CP --> REG[(Room Registry)]
+    CP --> SFU[SFU Cluster]
+    U -. WebRTC .-> SFU
+    API --> MSG[Message Service]
+    MSG --> MSGDB[(Scylla/Aerospike)]
+    API --> PG[(PostgreSQL)]
+    API --> SES[(Redis Sessions)]
+    API --> KFK[Kafka]
+    KFK --> CH[(ClickHouse)]
+    SFU --> OBS[Prometheus/Grafana]
+```
+
+## 11. Расчет ресурсов
+
+### Входные точки для sizing
+
+| Метрика | Значение | Основание |
+|---|---:|---|
+| Message write peak | 29,514 RPS | `9,838 * 3` |
+| Voice traffic peak | ~694 Gbit/s | D7 |
+| RTP peak | 416,666,667 packets/s | `D8 * 3` |
+| RTCP peak | 1,666,668 reports/s | `D9 * 3` |
+
+### Сводная оценка мощностей (целевые пулы)
+
+| Пул | CPU (cores) | RAM | Network | Кол-во узлов |
+|---|---:|---:|---:|---:|
+| Edge L7/API | 192 | 768 GB | 200 Gbit/s | 24 |
+| SFU media | 1,280 | 5 TB | 1,200 Gbit/s | 80 |
+| Messaging | 256 | 1 TB | 250 Gbit/s | 16 |
+| PostgreSQL/Citus | 96 | 384 GB | 40 Gbit/s | 6 |
+| Redis/Aerospike | 192 | 1.5 TB | 80 Gbit/s | 12 |
+| Kafka/ClickHouse | 160 | 640 GB | 60 Gbit/s | 10 |
+| Observability | 64 | 256 GB | 20 Gbit/s | 4 |
+
+### Размещение
+
+| Компонент | Размещение |
+|---|---|
+| SFU | Bare metal (приоритет latency + NIC throughput) |
+| API/Control Plane | Kubernetes |
+| Data services | Bare metal / managed |
+| S3 | Cloud object storage |
 
 ## Список источников
 
-[^1]: [Статистика по дискордку за 2025 год](https://discord.com/press-releases/social-sdk-ingame-communications)
-
-[^2]: [Data reportal Australia за 2026 год](https://datareportal.com/reports/digital-2026-australia)
-
-[^3]: [Сколько играют в игры в Австралии - Australia Plays 2025](https://igea.net/wp-content/uploads/2025/08/AP25-Report-28_08-WITH-LINKS.pdf)
-
-[^4]: [Mau для Micropsoft Teams](https://learn.microsoft.com/en-us/microsoftteams/platform/overview#:~:text=320%20million%20monthly%20active%20users)
-
-[^5]: [DAU для дискорда](https://discord.com/developers/social-sdk#:~:text=90M%2B%20daily%20active%20users)
-
-[^6]: [Медиа опрос аудитории по коммуникациям и медиа в Австралии на декабрь 2024 года](https://www.acma.gov.au/sites/default/files/2025-07/How%20we%20communicate%20-%20Executive%20summary%20and%20key%20findings_0.pdf)
-
-[^7]: [Q1 2025. Топ приложения для бизнеса](https://sensortower.com/blog/2025-q1-unified-top-5-business%20apps-units-au-60128cd0241bc16eb8d41c6f)
-
-[^8]: [Discord Engineering: How Discord Handles Two and Half Million Concurrent Voice Users Using WebRTC](https://discord.com/blog/how-discord-handles-two-and-half-million-concurrent-voice-users-using-webrtc)
-
-[^9]: [LiveKit Benchmarking](https://docs.livekit.io/home/self-hosting/benchmark/)
-
-[^10]: [Лимит 40 минут для Zoom Meetings](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0067966)
-
-[^11]: [Запись звонков в облако в Zoom](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0062627)
-
-[^12]: [Команды и горячие клавиши Discord](https://support.discord.com/hc/en-us/articles/31232432266647-Discord-Commands-Shortcuts-and-Navigation-Guide)
-
-[^13]: [Как настроить горячие клавиши в Discord](https://support.discord.com/hc/en-us/articles/217083547-How-do-I-add-different-Keybinds)
-
-[^14]: [Видео-звонки в Discord](https://support.discord.com/hc/en-us/articles/360041721052-Video-Calls)
-
-[^15]: [Групповые чаты и звонки в Discord](https://support.discord.com/hc/en-us/articles/223657667-Group-Chat-and-Calls)
-
-[^16]: [Screen Share и Go Live в Discord](https://support.discord.com/hc/en-us/articles/360040816151-Go-Live-and-Screen-Share)
+1. [Discord Statistics 2025](https://helplama.com/discord-statistics/)
+2. [Discord statistics and users](https://www.demandsage.com/discord-statistics/)
+3. [Discord crosses 250 million users](https://venturebeat.com/business/discord-crosses-250-million-users-as-it-hits-4-year-anniversary/)
+4. [Discord statistics and trends](https://www.cloudwards.net/discord-statistics/)
+5. [How many Discord servers are there](https://thesmallbusinessblog.com/how-many-discord-servers-are-there/)
+6. [Discord geography traffic](https://www.similarweb.com/website/discord.com/#geography)
+7. [Zoom 300M daily meeting participants](https://www.reuters.com/article/us-zoom-video-commn-encryption/zoom-says-it-has-300-million-daily-meeting-participants-not-users-idUSKBN22C1T4)
+8. [Zoom bandwidth requirements](https://library.zoom.com/admin-corner/network-management/quality-of-service-and-network-best-practices-explainer/calculating-bandwidth-usage-for-zoom-meetings-and-phone)
+9. [Discord voice scale (2018)](https://habr.com/ru/articles/423171/)
+10. [Nginx performance benchmark](https://blog.nginx.org/blog/testing-the-performance-of-nginx-and-nginx-plus-web-servers)
+11. [Aerospike benchmark](https://aerospike.com/blog/new-aerospike-benchmark-demonstrates-real-time-performance-at-petabyte-scale/)
+12. [Data center map](https://map.datacente.rs/)
