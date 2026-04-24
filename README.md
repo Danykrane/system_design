@@ -134,6 +134,10 @@ flowchart TD
 
 ## 5. Логическая схема БД
 
+Для получения картинки использовался сервис [dbdiagram](https://dbdiagram.io/) с кодом из [этого файла](db/database-sql.md) (интерактивная ссылка на работу: [dbdiagram](https://dbdiagram.io/d/69eba36dc6a36f9c1b72a252)).
+
+PDF-версия system design: [`docs/system_design.pdf`](docs/system_design.pdf).
+
 Доп. обоснования: [`archive/05-logical-db.md`](archive/05-logical-db.md).
 
 | DB-домен | Ключевые сущности | Нагрузка |
