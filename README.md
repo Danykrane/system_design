@@ -134,7 +134,9 @@ flowchart TD
 
 ## 5. Логическая схема БД
 
-Для получения картинки использовался сервис [dbdiagram](https://dbdiagram.io/) с кодом из [этого файла](db/database-sql.md) (интерактивная ссылка на работу: [dbdiagram](https://dbdiagram.io/d/69eba36dc6a36f9c1b72a252)).
+Схема в этом разделе взята с первой страницы PDF: [`docs/system_design.pdf`](docs/system_design.pdf) (изображение: `docs/system_design_page1.png`).
+
+DBML-код логической схемы для редактирования в [dbdiagram](https://dbdiagram.io/): [`db/database-sql.md`](db/database-sql.md) (интерактивная ссылка: [dbdiagram](https://dbdiagram.io/d/69eba36dc6a36f9c1b72a252)).
 
 PDF-версия system design: [`docs/system_design.pdf`](docs/system_design.pdf).
 
@@ -148,16 +150,9 @@ PDF-версия system design: [`docs/system_design.pdf`](docs/system_design.pd
 | Messaging | `messages`, `message_reactions` | high read/write |
 | Media/Analytics | `recordings`, `analytics_events` | medium + async high write |
 
-```mermaid
-erDiagram
-    USERS ||--o{ SESSIONS : has
-    USERS ||--o{ SERVERS : owns
-    USERS ||--o{ ROOM_PARTICIPANTS : joins
-    SERVERS ||--o{ ROOMS : contains
-    ROOMS ||--o{ ROOM_PARTICIPANTS : has
-    ROOMS ||--o{ MESSAGES : has
-    ROOMS ||--o{ RECORDINGS : has
-```
+Логическая схема:
+
+![Логическая схема БД](docs/system_design_page1.png)
 
 ### Сущности и нагрузки
 
