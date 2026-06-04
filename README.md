@@ -83,26 +83,26 @@
 
 #### 2.1. Исходные метрики и расчётные коэффициенты
 
-| Тип | Параметр | Значение | Источник / расчёт |
-| --- | -------- | -------: | ----------------- |
-| Публичная метрика | MAU | 320 000 000 | Microsoft Teams [^12] |
-| Публичная метрика | DAU | 75 000 000 | Microsoft Teams [^1] |
-| Публичная метрика | Daily meeting participants | 300 000 000 | Zoom [^1][^2] |
-| Публичная метрика | Средний размер встречи | 10 участников | Zoom [^3] |
-| Публичная метрика | Средняя длительность встречи | 54 минуты | Zoom [^3] |
-| Публичная метрика | 720p group video upload | 2.6 Mbps | Zoom bandwidth requirements [^4] |
-| Публичная метрика | 720p group video download | 1.8 Mbps | Zoom bandwidth requirements [^4] |
-| Публичная метрика | Audio VoIP | 60–80 kbps | Zoom bandwidth requirements [^4] |
-| Публичная метрика | Screen sharing | 50–150 kbps | Zoom bandwidth requirements [^4] |
-| Публичная метрика | Лимит chat message | 4 000 символов | Zoom Chat specifications [^5] |
-| Публичная метрика | Cloud recording quota | 10 GB на licensed user | Zoom cloud recording storage [^7] |
-| Расчётный коэффициент | Суточный пик `k_peak` | 3 | Для расчёта пикового RPS и bandwidth |
-| Расчётный коэффициент | Heartbeat interval | 25 секунд | Socket.IO default `pingInterval` [^10] |
-| Расчётный коэффициент | Горячее хранение метаданных | 30 дней | Для активных встреч и участников |
-| Расчётный коэффициент | Размер строки `users` | 256 B | Проектная оценка строки аккаунта |
-| Расчётный коэффициент | Размер строки `meetings` | 256 B | Проектная оценка строки встречи |
-| Расчётный коэффициент | Размер строки `meeting_participants` | 128 B | Проектная оценка строки участника встречи |
-| Расчётный коэффициент | Размер строки `user_sessions` | 128 B | Проектная оценка строки сессии |
+| Параметр                             |               Значение | Источник / расчёт                         |
+| ------------------------------------ | ---------------------: | ----------------------------------------- |
+| MAU                                  |            320 000 000 | Microsoft Teams [^12]                     |
+| DAU                                  |             75 000 000 | Microsoft Teams [^1]                      |
+| Daily meeting participants           |            300 000 000 | Zoom [^1][^2]                             |
+| Средний размер встречи               |          10 участников | Zoom [^3]                                 |
+| Средняя длительность встречи         |              54 минуты | Zoom [^3]                                 |
+| 720p group video upload              |               2.6 Mbps | Zoom bandwidth requirements [^4]          |
+| 720p group video download            |               1.8 Mbps | Zoom bandwidth requirements [^4]          |
+| Audio VoIP                           |             60–80 kbps | Zoom bandwidth requirements [^4]          |
+| Screen sharing                       |            50–150 kbps | Zoom bandwidth requirements [^4]          |
+| Лимит chat message                   |         4 000 символов | Zoom Chat specifications [^5]             |
+| Cloud recording quota                | 10 GB на licensed user | Zoom cloud recording storage [^7]         |
+| Суточный пик `k_peak`                |                      3 | Для расчёта пикового RPS и bandwidth      |
+| Heartbeat interval                   |              25 секунд | Socket.IO default `pingInterval` [^10]    |
+| Горячее хранение метаданных          |                30 дней | Для активных встреч и участников          |
+| Размер строки `users`                |                  256 B | Проектная оценка строки аккаунта          |
+| Размер строки `meetings`             |                  256 B | Проектная оценка строки встречи           |
+| Размер строки `meeting_participants` |                  128 B | Проектная оценка строки участника встречи |
+| Размер строки `user_sessions`        |                  128 B | Проектная оценка строки сессии            |
 
 #### 2.2. Продуктовые метрики и действия пользователя
 
