@@ -476,7 +476,7 @@ N*2 = N_base * 2
 Логическая схема не привязана к конкретной СУБД, шардингу и физическим индексам. В схему включены основные таблицы, кеши, runtime-состояние и файловые данные.
 
 ##### Логическая схема
-Для получения картинки использовался сервис [dbdiagram](https://dbdiagram.io/) с кодом из [этого файла](resource/database-sql)([интерактивная ссылка на работу](https://dbdiagram.io/d/logic-database-6a3bcd543b9b0de59965ea98)).
+Для получения картинки использовался сервис [dbdiagram](https://dbdiagram.io/) с кодом из [этого файла](resource/database-sql.md) ([интерактивная ссылка на работу](https://dbdiagram.io/d/logic-database-6a3bcd543b9b0de59965ea98)).
 
 ![Логическая схема БД](resource/icons/images/logic-database.svg)
 
