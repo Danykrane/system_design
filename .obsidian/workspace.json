@@ -42,7 +42,7 @@
               "type": "markdown",
               "state": {
                 "file": "README.md",
-                "mode": "source",
+                "mode": "preview",
                 "source": false
               },
               "icon": "lucide-file",
@@ -212,10 +212,10 @@
       "bases:Создать новую базу": false
     }
   },
-  "active": "3ddd8ee0c387f949",
+  "active": "db43bccb7f199a0a",
   "lastOpenFiles": [
-    "README.md",
     "README 1.md",
+    "README.md",
     "resource/physical-database-sql.md",
     "resource/icons/images/physical-database(1).svg",
     "resource/icons/images/physical-database.svg",
