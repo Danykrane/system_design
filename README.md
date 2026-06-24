@@ -178,231 +178,198 @@ peak_RPS = avg_RPS * MF_K_PEAK
 
 ### 3. Глобальная балансировка нагрузки
 
-В этом разделе выбирается глобальная схема распределения пользователей между дата-центрами. Для MeetFlow критичен не только HTTP RPS, но и медиа-трафик: основная нагрузка находится в `Media Plane`, где идут видео, аудио и демонстрация экрана.
-
-Главный принцип: **новая встреча закрепляется за одним домашним дата-центром**, а участники подключаются к ближайшему доступному media-edge. Для групповых WebRTC-встреч используется SFU-подход: SFU получает аудио/видео от клиентов и пересылает потоки другим участникам без полного смешивания медиа [^17].
+Для MeetFlow глобальная балансировка нужна не только для HTTP API, но и для real-time медиа. Видеовстреча закрепляется за `home_dc`, а медиа идёт через ближайший доступный SFU. SFU получает аудио/видео от участников и пересылает потоки другим участникам без полного микширования, поэтому такой слой нужно размещать близко к пользователям [^14].
 
 #### 3.1. Функциональное разбиение по доменам
 
-| Домен | Что делает | Глобальная балансировка | Почему так |
-| ----- | ---------- | ----------------------- | ---------- |
-| `Auth / Users` | Логин, профиль, токены | Active-active по всем ДЦ | Низкий трафик, можно обслуживать рядом с пользователем |
-| `Meeting Control Plane` | Создание встречи, join/leave, состояние встречи | Active-active, но встреча получает `home_dc` | Нужно быстро создать встречу и не потерять состояние участников |
-| `Media Plane / SFU` | Видео, аудио, screen sharing | Ближайший здоровый ДЦ + sticky по `meeting_id` | Самый тяжёлый трафик; важны RTT, jitter и packet loss |
-| `Presence / Heartbeat` | Heartbeat участников | В том же ДЦ, что и встреча | `MF_HEARTBEAT_RPS_PEAK = 1 350 000`, нельзя гонять лишний трафик между ДЦ |
-| `Meeting Chat` | Чат внутри встречи | В `home_dc`, репликация асинхронно | Чат менее критичен, чем медиа |
-| `Recording` | Запись встречи и метаданные | Запись создаётся в `home_dc`, object storage реплицируется | Запись привязана к медиа-потоку и не должна нагружать другие ДЦ |
-| `Observability` | Метрики, логи, алерты | Локальный сбор + глобальная агрегация | Для failover нужны health/capacity метрики по каждому ДЦ |
+| Домен | Основная нагрузка | Как балансируем |
+| ----- | ----------------- | --------------- |
+| `Auth / Users` | Логин, профиль, токены | Любой здоровый ДЦ |
+| `Meeting Control Plane` | `POST /meetings`, `join`, `leave` | Ближайший ДЦ, встрече выдаётся `home_dc` |
+| `Media Plane / SFU` | Видео, аудио, screen sharing | Только ближайший/разрешённый media-ДЦ |
+| `Presence / Heartbeat` | `WS /presence/heartbeat` | В том же ДЦ, что и встреча |
+| `Meeting Chat` | Сообщения внутри встречи | В `home_dc`, репликация асинхронно |
+| `Recording` | Запись встречи | В `home_dc`, object storage реплицируется отдельно |
 
 ```mermaid
 flowchart TD
-    U["Пользователь"] --> DNS["Global DNS / Traffic Manager"]
-    DNS --> API["Ближайший API Edge"]
+    U["User"] --> DNS["Global DNS / GTM"]
+    DNS --> API["API Edge"]
     API --> CP["Meeting Control Plane"]
-    CP --> HOME["Назначение home_dc<br/>для meeting_id"]
-    HOME --> SFU["Media Plane / SFU"]
-    SFU --> REC["Recording Service"]
-    SFU --> PRES["Presence / Heartbeat"]
-    CP --> CHAT["Meeting Chat"]
+    CP --> HOME["home_dc по meeting_id"]
+    HOME --> SFU["Media SFU"]
+    SFU --> REC["Recording"]
+    HOME --> PRES["Presence"]
+    HOME --> CHAT["Chat"]
 ```
 
-#### 3.2. Выбор и расположение дата-центров
+#### 3.2. Расположение ДЦ по статистике использования
 
-Zoom как реальный аналог даёт владельцам платных аккаунтов возможность выбирать регионы дата-центров для обработки real-time meeting traffic, а также описывает edge-routing между ДЦ [^11]. Для MeetFlow используем похожую идею: **real-time медиа обрабатывается в ближайшем разрешённом ДЦ**.
+Для расчёта не берём равномерное распределение. WebbyCrown показывает, что Zoom сильно сконцентрирован в США, а также выделяет Японию, Индию, Канаду и UK как важные рынки [^11]. Для численного распределения берём таблицу WallStreetZen/SimilarWeb: U.S. — 40.73%, Japan — 5%, India — 4.35%, UK — 3.72%, Canada — 3.69%, Other — 42.5% [^12].
 
-| ДЦ | Зона ответственности | Доля нагрузки | Влияние на продуктовые метрики |
-| -- | -------------------- | ------------: | ------------------------------ |
-| `DC-US-EAST` | Восток США, часть Канады, резерв для Европы | **20%** | Снижает задержку для east-coast пользователей и даёт быстрый failover для Европы |
-| `DC-US-WEST` | Запад США, резерв для Японии | **15%** | Снижает задержку для west-coast пользователей и даёт ближайший fallback для Японии |
-| `DC-EU-CENTRAL` | Европа | **35%** | Основной европейский ДЦ; влияет на join latency, media RTT и качество screen sharing |
-| `DC-RU-MOSCOW` | Россия | **10%** | Убирает лишний межрегиональный RTT для российских пользователей |
-| `DC-JP-TOKYO` | Япония и ближайшая APAC-нагрузка | **20%** | Нужен для низкой задержки в Японии и стабильного video download |
+`Other` не дробится по странам, потому что в источнике нет детализации. Поэтому для расчёта он оставлен как отдельный `OTHER_REGIONAL_POOL`, а не распределён произвольно по Европе/Азии/России.
 
-Доли нагрузки — **проектное допущение для sizing**, а не публичная статистика Zoom или Teams. При появлении реальной аналитики таблица заменяется на фактическое распределение по странам. Сам принцип разнесения сервиса по географическим регионам соответствует модели крупных cloud-провайдеров, где регионы используются для глобального покрытия, отказоустойчивости и снижения задержек [^12].
+| Страна / группа | Доля | Логический ДЦ / пул | Почему так |
+| ---------------- | ---: | ------------------- | ---------- |
+| U.S. | 40.73% | `DC-US-NORTHAMERICA` | Самая большая доля пользователей |
+| Canada | 3.69% | `DC-US-NORTHAMERICA` | Близко к североамериканскому ДЦ |
+| Japan | 5.00% | `DC-JP-TOKYO` | Отдельный ДЦ снижает media RTT в Японии |
+| India | 4.35% | `DC-IN-MUMBAI` | Отдельный ДЦ нужен из-за удалённости от США/Европы |
+| UK | 3.72% | `DC-UK-LONDON` | Низкая задержка для UK и близкий вход в Европу |
+| Other | 42.51% | `OTHER_REGIONAL_POOL` | Остальные страны направляются по geo/latency routing |
+| **Итого** | **100%** | — | `Other` увеличен на 0.01 п.п. из-за округления в источнике |
 
-| Метрика продукта | Почему зависит от расположения ДЦ |
-| ---------------- | --------------------------------- |
-| `join latency` | DNS и control-plane должны быстро вернуть регион встречи |
-| `media RTT` | Чем ближе SFU, тем ниже задержка аудио/видео |
-| `jitter / packet loss` | Длинный маршрут повышает риск просадок качества |
-| `recording start delay` | Запись стартует рядом с медиа-потоком |
-| `availability` | Отказ одного ДЦ не должен ломать создание новых встреч в других регионах |
+Zoom как реальный аналог позволяет платным аккаунтам выбирать дата-центры, которые будут обрабатывать real-time video/audio/shared content meeting traffic [^13]. Поэтому для MeetFlow тоже разделяем **control-plane** и **media-plane**: API можно балансировать шире, а медиа — только в разрешённый/ближайший регион.
 
-#### 3.3. Распределение нагрузки по дата-центрам
+| ДЦ / пул | Доля нагрузки | На какие продуктовые метрики влияет |
+| -------- | ------------: | ----------------------------------- |
+| `DC-US-NORTHAMERICA` | 44.42% | `join latency`, media RTT, стабильность видео для США/Канады |
+| `DC-JP-TOKYO` | 5.00% | media RTT для Японии, меньше packet loss на видео |
+| `DC-IN-MUMBAI` | 4.35% | latency для Индии, стабильность screen sharing |
+| `DC-UK-LONDON` | 3.72% | latency для UK, быстрый вход в европейский сегмент |
+| `OTHER_REGIONAL_POOL` | 42.51% | глобальный fallback; точная разбивка появится после real GEO analytics |
 
-Для распределения используем формулу:
+#### 3.3. Распределение нагрузки по ДЦ
+
+Формула:
 
 ```text
 dc_metric = global_metric * dc_share
 ```
 
-##### Распределение продуктовой нагрузки
+##### Продуктовая нагрузка
 
-| ДЦ | Доля | DAU | Участий во встречах/сутки | Встреч/сутки | Peak online participants |
-| -- | ---: | --: | ------------------------: | -----------: | -----------------------: |
-| `DC-US-EAST` | 20% | **23 000 000** | **60 000 000** | **6 000 000** | **6 750 000** |
-| `DC-US-WEST` | 15% | **17 250 000** | **45 000 000** | **4 500 000** | **5 062 500** |
-| `DC-EU-CENTRAL` | 35% | **40 250 000** | **105 000 000** | **10 500 000** | **11 812 500** |
-| `DC-RU-MOSCOW` | 10% | **11 500 000** | **30 000 000** | **3 000 000** | **3 375 000** |
-| `DC-JP-TOKYO` | 20% | **23 000 000** | **60 000 000** | **6 000 000** | **6 750 000** |
+| ДЦ / пул | Доля | DAU | Участий/сутки | Встреч/сутки | Peak online |
+| -------- | ---: | --: | ------------: | -----------: | ----------: |
+| `DC-US-NORTHAMERICA` | 44.42% | **51 083 000** | **133 260 000** | **13 326 000** | **14 991 750** |
+| `DC-JP-TOKYO` | 5.00% | **5 750 000** | **15 000 000** | **1 500 000** | **1 687 500** |
+| `DC-IN-MUMBAI` | 4.35% | **5 002 500** | **13 050 000** | **1 305 000** | **1 468 125** |
+| `DC-UK-LONDON` | 3.72% | **4 278 000** | **11 160 000** | **1 116 000** | **1 255 500** |
+| `OTHER_REGIONAL_POOL` | 42.51% | **48 886 500** | **127 530 000** | **12 753 000** | **14 347 125** |
 | **Итого** | **100%** | **115 000 000** | **300 000 000** | **30 000 000** | **33 750 000** |
 
-##### Распределение пикового RPS
+##### Пиковый RPS
 
-| ДЦ | `POST /meetings` | `POST /join` | `POST /leave` | `WS /heartbeat` | `POST /recordings/metadata` |
-| -- | ---------------: | -----------: | ------------: | ---------------: | ---------------------------: |
-| `DC-US-EAST` | **208 RPS** | **2 083 RPS** | **2 083 RPS** | **270 000 RPS** | **208 RPS** |
-| `DC-US-WEST` | **156 RPS** | **1 563 RPS** | **1 563 RPS** | **202 500 RPS** | **156 RPS** |
-| `DC-EU-CENTRAL` | **365 RPS** | **3 646 RPS** | **3 646 RPS** | **472 500 RPS** | **365 RPS** |
-| `DC-RU-MOSCOW` | **104 RPS** | **1 042 RPS** | **1 042 RPS** | **135 000 RPS** | **104 RPS** |
-| `DC-JP-TOKYO` | **208 RPS** | **2 083 RPS** | **2 083 RPS** | **270 000 RPS** | **208 RPS** |
-| **Итого** | **1 042 RPS** | **10 417 RPS** | **10 417 RPS** | **1 350 000 RPS** | **1 042 RPS** |
+| ДЦ / пул | `POST /meetings` | `POST /join` | `POST /leave` | `WS /heartbeat` | `POST /recordings/metadata` |
+| -------- | ---------------: | -----------: | ------------: | ---------------: | ---------------------------: |
+| `DC-US-NORTHAMERICA` | **463** | **4 627** | **4 627** | **599 670** | **463** |
+| `DC-JP-TOKYO` | **52** | **521** | **521** | **67 500** | **52** |
+| `DC-IN-MUMBAI` | **45** | **453** | **453** | **58 725** | **45** |
+| `DC-UK-LONDON` | **39** | **388** | **388** | **50 220** | **39** |
+| `OTHER_REGIONAL_POOL` | **443** | **4 428** | **4 428** | **573 885** | **443** |
+| **Итого** | **1 042** | **10 417** | **10 417** | **1 350 000** | **1 042** |
 
-`MF_CHAT_RPS_FORMULA` не распределяется численно, потому что в открытых источниках не подставлялась частота chat-сообщений на пользователя. Для него остаётся формула:
+##### Пиковый media bandwidth
 
-```text
-chat_peak_RPS_dc = MF_DAU * dc_share * chat_messages_per_DAU_day / 86400 * MF_K_PEAK
-```
+| ДЦ / пул | Video upload | Video download | Audio | Screen sharing | Суммарно |
+| -------- | -----------: | -------------: | ----: | -------------: | -------: |
+| `DC-US-NORTHAMERICA` | **38 978.6 Gbps** | **26 985.2 Gbps** | **1 199.3 Gbps** | **2 248.8 Gbps** | **69 411.8 Gbps** |
+| `DC-JP-TOKYO` | **4 387.5 Gbps** | **3 037.5 Gbps** | **135.0 Gbps** | **253.1 Gbps** | **7 813.1 Gbps** |
+| `DC-IN-MUMBAI` | **3 817.1 Gbps** | **2 642.6 Gbps** | **117.4 Gbps** | **220.2 Gbps** | **6 797.4 Gbps** |
+| `DC-UK-LONDON` | **3 264.3 Gbps** | **2 259.9 Gbps** | **100.4 Gbps** | **188.3 Gbps** | **5 813.0 Gbps** |
+| `OTHER_REGIONAL_POOL` | **37 302.5 Gbps** | **25 824.8 Gbps** | **1 147.8 Gbps** | **2 152.1 Gbps** | **66 427.2 Gbps** |
+| **Итого** | **87 750.0 Gbps** | **60 750.0 Gbps** | **2 700.0 Gbps** | **5 062.5 Gbps** | **156 262.5 Gbps** |
 
-##### Распределение пикового media bandwidth
+##### Записи встреч
 
-| ДЦ | Video upload | Video download | Audio | Screen sharing | Суммарно |
-| -- | -----------: | -------------: | ----: | -------------: | -------: |
-| `DC-US-EAST` | **17 550 Gbps** | **12 150 Gbps** | **540 Gbps** | **1 012.5 Gbps** | **31 252.5 Gbps** |
-| `DC-US-WEST` | **13 162.5 Gbps** | **9 112.5 Gbps** | **405 Gbps** | **759.4 Gbps** | **23 439.4 Gbps** |
-| `DC-EU-CENTRAL` | **30 712.5 Gbps** | **21 262.5 Gbps** | **945 Gbps** | **1 771.9 Gbps** | **54 691.9 Gbps** |
-| `DC-RU-MOSCOW` | **8 775 Gbps** | **6 075 Gbps** | **270 Gbps** | **506.3 Gbps** | **15 626.3 Gbps** |
-| `DC-JP-TOKYO` | **17 550 Gbps** | **12 150 Gbps** | **540 Gbps** | **1 012.5 Gbps** | **31 252.5 Gbps** |
-| **Итого** | **87 750 Gbps** | **60 750 Gbps** | **2 700 Gbps** | **5 062.5 Gbps** | **156 262.5 Gbps** |
-
-##### Распределение записей встреч
-
-| ДЦ | Worst-case запись/сутки | Worst-case запись за 30 дней |
-| -- | ----------------------: | ---------------------------: |
-| `DC-US-EAST` | **4.568 PB/сутки** | **137.052 PB** |
-| `DC-US-WEST` | **3.426 PB/сутки** | **102.789 PB** |
-| `DC-EU-CENTRAL` | **7.995 PB/сутки** | **239.841 PB** |
-| `DC-RU-MOSCOW` | **2.284 PB/сутки** | **68.526 PB** |
-| `DC-JP-TOKYO` | **4.568 PB/сутки** | **137.052 PB** |
+| ДЦ / пул | Worst-case запись/сутки | Worst-case запись за 30 дней |
+| -------- | ----------------------: | ---------------------------: |
+| `DC-US-NORTHAMERICA` | **10.146 PB/сутки** | **304.392 PB** |
+| `DC-JP-TOKYO` | **1.142 PB/сутки** | **34.263 PB** |
+| `DC-IN-MUMBAI` | **0.994 PB/сутки** | **29.809 PB** |
+| `DC-UK-LONDON` | **0.850 PB/сутки** | **25.492 PB** |
+| `OTHER_REGIONAL_POOL` | **9.710 PB/сутки** | **291.304 PB** |
 | **Итого** | **22.842 PB/сутки** | **685.260 PB** |
 
-Вывод: основная глобальная проблема — не `POST /meetings` и не `join`, а **пиковый media bandwidth** и **heartbeat**. Поэтому глобальная балансировка должна управлять не только HTTP-запросами, но и размещением SFU.
+Вывод: главный объём — **media bandwidth**, а не HTTP RPS. Поэтому глобальная балансировка управляет в первую очередь размещением `Media Plane / SFU`.
 
-#### 3.4. Схема DNS-балансировки
+#### 3.4. DNS-балансировка
 
-DNS-балансировка используется для первого входа пользователя в систему. Для latency-based routing DNS может выбирать регион с минимальной задержкой среди доступных регионов [^13]. Geo steering также позволяет направлять пользователей в pools, привязанные к странам или регионам [^14].
+DNS используется для первого выбора региона. Latency-based routing выбирает регион с меньшей задержкой среди доступных регионов [^15]. Geo/traffic steering нужен, чтобы учитывать страну, health и веса пулов [^16].
 
-| DNS-имя | Что балансирует | Политика |
-| ------- | --------------- | -------- |
-| `api.meetflow.example` | REST API: login, meetings, recordings metadata | latency + health + capacity |
-| `ws.meetflow.example` | WebSocket control-plane и heartbeat | geo/latency + sticky session |
-| `media.meetflow.example` | Выдача регионального media endpoint | не прямой SFU, а bootstrap endpoint |
-| `recording.meetflow.example` | Upload/metadata для записей | routing в `home_dc` встречи |
+| DNS-имя | Что выбирает | Политика |
+| ------- | ------------ | -------- |
+| `api.meetflow.example` | API edge | latency + health |
+| `ws.meetflow.example` | WebSocket edge | geo + session affinity |
+| `media.meetflow.example` | media bootstrap | возвращает regional SFU endpoint |
+| `recording.meetflow.example` | запись встречи | routing в `home_dc` |
 
 ```mermaid
 flowchart TD
-    C["Client"] --> R["Recursive DNS Resolver"]
-    R --> GTM["Global DNS / Traffic Manager"]
-
-    GTM --> H["Health + Capacity checks"]
-    H --> USE["DC-US-EAST LB"]
-    H --> USW["DC-US-WEST LB"]
-    H --> EU["DC-EU-CENTRAL LB"]
-    H --> RU["DC-RU-MOSCOW LB"]
-    H --> JP["DC-JP-TOKYO LB"]
-
-    C --> API["HTTPS / WebSocket<br/>к выбранному ДЦ"]
-    API --> TOKEN["Join token:<br/>meeting_id + home_dc + media_endpoint"]
+    C["Client"] --> DNS["DNS / GTM"]
+    DNS --> H["Health + capacity"]
+    H --> US["DC-US"]
+    H --> JP["DC-JP"]
+    H --> IN["DC-IN"]
+    H --> UK["DC-UK"]
+    H --> O["OTHER pool"]
+    US --> T["join_token: meeting_id + home_dc + media_endpoint"]
+    JP --> T
+    IN --> T
+    UK --> T
+    O --> T
 ```
 
-Как работает по шагам:
+#### 3.5. Anycast-балансировка
 
-1. Клиент открывает `api.meetflow.example`.
-2. DNS/GTM выбирает ближайший здоровый ДЦ.
-3. Control-plane создаёт или находит `home_dc` встречи.
-4. Клиент получает `join_token` и региональный `media_endpoint`.
-5. Медиа-поток идёт в SFU, закреплённый за встречей.
+Anycast используем только для входного front door. Google Cloud описывает глобальные proxy load balancers с одним Anycast IP и backends в разных регионах [^18]. Для media-flow после join нужен конкретный regional endpoint, иначе активная встреча может пострадать при смене маршрута.
 
-#### 3.5. Схема Anycast-балансировки
-
-Anycast используется **ограниченно**. Для HTTP(S) front door это удобно: глобальный балансировщик может иметь один Anycast IP и направлять пользователя к ближайшему backend [^16]. Но для WebRTC media-flow прямой Anycast опасен: при изменении BGP-маршрута во время встречи клиент может попасть в другой edge.
-
-| Трафик | Anycast используется | Причина |
-| ------ | ------------------- | ------- |
-| `api.meetflow.example` | Да | Короткие HTTPS-запросы, удобно направлять на ближайший edge |
-| `ws.meetflow.example` | Частично | Можно для входа, но нужна session affinity |
-| `media.meetflow.example` | Только как bootstrap | Клиент получает конкретный regional endpoint |
-| RTP/SRTP media traffic | Нет, основной путь региональный | Видеовстреча должна быть sticky к SFU/региону |
-| Recording upload | Нет | Запись привязана к `home_dc` встречи |
+| Трафик | Anycast | Почему |
+| ------ | ------- | ------ |
+| API | Да | Короткие HTTPS-запросы |
+| WebSocket bootstrap | Да, до закрепления | Нужен быстрый вход |
+| RTP/SRTP media | Нет | Встреча sticky к SFU-региону |
+| Recording upload | Нет | Запись идёт в `home_dc` |
 
 ```mermaid
 flowchart TD
-    C["Client"] --> AIP["Anycast IP<br/>api.meetflow.example"]
-    AIP --> EDGE["Ближайший Edge"]
+    C["Client"] --> A["Anycast IP"]
+    A --> EDGE["Nearest edge"]
     EDGE --> CP["Control Plane"]
-    CP --> REGION["Выбор meeting home_dc"]
-    REGION --> EP["Regional media endpoint<br/>media-eu / media-us / media-jp"]
-    C --> SFU["Sticky WebRTC media<br/>в выбранный SFU-регион"]
+    CP --> R["Regional media endpoint"]
+    C --> SFU["Sticky SFU media path"]
 ```
 
-Итог: Anycast ускоряет вход и API, но **не заменяет региональное закрепление медиа-сессии**.
+#### 3.6. Регулировка трафика между ДЦ
 
-#### 3.6. Регулировка трафика между дата-центрами
-
-Регулировка делается через Global Traffic Manager. Он учитывает health-checks, latency, текущую загрузку, ручные веса и правила data residency. Cloudflare Load Balancing, например, поддерживает steering policies, health monitors, fallback pools и распределение по весам [^15][^18].
-
-##### Модель выбора ДЦ
+Регулировка идёт через веса в GTM. Cloudflare Load Balancing использует healthy pools для traffic steering, а monitors регулярно проверяют endpoints и выводят unhealthy pool из ротации [^16][^17].
 
 ```text
-effective_weight_dc = geo_match * health_status * capacity_weight * manual_weight * residency_policy
+effective_weight = geo_match * health * capacity_weight * manual_weight
 ```
 
-| Параметр | Значение |
-| -------- | -------- |
-| `geo_match` | 1, если ДЦ подходит пользователю по географии; ниже 1 для fallback |
-| `health_status` | 1 для healthy, 0 для critical/down |
-| `capacity_weight` | уменьшается при высокой загрузке CPU/network/SFU |
-| `manual_weight` | ручной вес для maintenance и controlled rollout |
-| `residency_policy` | запрещает routing в регион, если это нарушает продуктовые/юридические ограничения |
+| Ситуация | Что делаем |
+| -------- | ---------- |
+| Норма | Страна пользователя → ближайший healthy ДЦ |
+| ДЦ перегружен | Уменьшаем `capacity_weight`, новые встречи уходят в fallback |
+| Maintenance | `manual_weight = 0`, старые встречи доживают |
+| ДЦ down | `health = 0`, ДЦ убирается из DNS/GTM |
+| SFU pool degraded | Новые `meeting_id` не выдаются на этот SFU pool |
 
-##### Правила регулировки
-
-| Сценарий | Действие GTM | Что происходит с пользователем |
-| -------- | ------------ | ------------------------------ |
-| Нормальная работа | Geo/latency routing в ближайший ДЦ | Пользователь попадает в ближайший media-регион |
-| ДЦ перегружен | Новые встречи постепенно уходят в fallback ДЦ | Уже идущие встречи не переносятся |
-| Maintenance | Вес ДЦ ставится в `0` для новых встреч | Старые встречи доживают до завершения |
-| ДЦ недоступен | DNS/GTM убирает ДЦ из выдачи | Новые встречи создаются в резервном регионе |
-| SFU pool degraded | Control-plane не выдаёт новые meeting_id на этот pool | Участники получают другой здоровый SFU |
-| Полный regional outage | Новые встречи идут в fallback; старые пытаются reconnect | Возможна краткая деградация качества |
-
-##### Матрица fallback
-
-| Основной ДЦ | Fallback 1 | Fallback 2 | Комментарий |
-| ----------- | ---------- | ---------- | ----------- |
-| `DC-US-EAST` | `DC-US-WEST` | `DC-EU-CENTRAL` | Сначала остаёмся внутри США |
-| `DC-US-WEST` | `DC-US-EAST` | `DC-JP-TOKYO` | Для части APAC ближе Япония |
-| `DC-EU-CENTRAL` | `DC-US-EAST` | `DC-RU-MOSCOW` | Россия используется только если политика разрешает |
-| `DC-RU-MOSCOW` | `DC-EU-CENTRAL` | `DC-US-EAST` | При data residency может быть режим degraded вместо failover |
-| `DC-JP-TOKYO` | `DC-US-WEST` | `DC-EU-CENTRAL` | Ближайший резерв — запад США |
+| Основной ДЦ / пул | Fallback |
+| ----------------- | -------- |
+| `DC-US-NORTHAMERICA` | `DC-UK-LONDON`, затем `OTHER_REGIONAL_POOL` |
+| `DC-JP-TOKYO` | `OTHER_REGIONAL_POOL`, затем `DC-US-NORTHAMERICA` |
+| `DC-IN-MUMBAI` | `OTHER_REGIONAL_POOL`, затем `DC-UK-LONDON` |
+| `DC-UK-LONDON` | `OTHER_REGIONAL_POOL`, затем `DC-US-NORTHAMERICA` |
+| `OTHER_REGIONAL_POOL` | Ближайший healthy ДЦ по latency |
 
 ```mermaid
 flowchart TD
-    M["Metrics:<br/>latency, health, bandwidth, SFU load"] --> GTM["Global Traffic Manager"]
-    GTM --> W["Update region weights"]
-    W --> DNS["DNS / Anycast Front Door"]
+    M["Metrics: health, latency, SFU load"] --> GTM["GTM"]
+    GTM --> W["Update weights"]
+    W --> DNS["DNS answers"]
     DNS --> NEW["New meetings"]
-    NEW --> DC1["Healthy target DC"]
-
+    NEW --> DC["Healthy DC"]
     GTM --> DRAIN["Drain overloaded DC"]
-    DRAIN --> OLD["Existing meetings stay<br/>until finish/reconnect"]
+    DRAIN --> OLD["Existing meetings stay"]
 ```
 
 #### 3.7. Вывод по глобальной балансировке
 
-Для MeetFlow используется **глобальная active-active схема** из пяти дата-центров: `DC-US-EAST`, `DC-US-WEST`, `DC-EU-CENTRAL`, `DC-RU-MOSCOW`, `DC-JP-TOKYO`.
+Для MeetFlow используется active-active схема, но с распределением по странам, а не с равными проектными долями: **США+Канада — 44.42%**, **Япония — 5.00%**, **Индия — 4.35%**, **UK — 3.72%**, **Other — 42.51%**.
 
-Ключевое решение: **control-plane можно балансировать глобально, но media-plane нужно закреплять за регионом встречи**. Это снижает задержку, упрощает расчёт SFU-нагрузки и не ломает активные видеовстречи при перераспределении новых пользователей.
+Главное правило: **API можно балансировать глобально, media-plane нужно закреплять за `home_dc` встречи**. Это снижает задержку и не ломает активную видеовстречу при изменении весов между ДЦ.
 
 ---
 
@@ -428,18 +395,18 @@ flowchart TD
 
 [^10]: [Zoom Investor Relations — Zoom Communications Reports Fourth Quarter and Fiscal Year 2026 Financial Results](https://investors.zoom.us/news-releases/news-release-details/zoom-communications-reports-fourth-quarter-and-fiscal-year-2026)
 
-[^11]: [Zoom Support — Selecting data center for meetings, webinars, whiteboards, notes and docs](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0060026)
+[^11]: [WebbyCrown — Zoom Users by Country: Insights on Global Adoption and Trends in 2026](https://www.webbycrown.com/zoom-users-by-country/)
 
-[^12]: [AWS — Global Infrastructure Regions and Availability Zones](https://aws.amazon.com/about-aws/global-infrastructure/regions_az/)
+[^12]: [WallStreetZen — Zoom Users by Country, source: SimilarWeb](https://www.wallstreetzen.com/stocks/us/nasdaq/zm/statistics)
 
-[^13]: [AWS Route 53 Documentation — Latency-based routing](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy-latency.html)
+[^13]: [Zoom Support — Selecting data center for meetings, webinars, whiteboards, notes and docs](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0060026)
 
-[^14]: [Cloudflare Docs — Load Balancing Geo steering](https://developers.cloudflare.com/load-balancing/understand-basics/traffic-steering/steering-policies/geo-steering/)
+[^14]: [mediasoup Documentation — SFU overview](https://mediasoup.org/documentation/overview/)
 
-[^15]: [Cloudflare Docs — Global traffic steering policies](https://developers.cloudflare.com/load-balancing/understand-basics/traffic-steering/steering-policies/)
+[^15]: [AWS Route 53 Documentation — Latency-based routing](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy-latency.html)
 
-[^16]: [Google Cloud Documentation — Cloud Load Balancing overview](https://docs.cloud.google.com/load-balancing/docs/load-balancing-overview)
+[^16]: [Cloudflare Docs — Global traffic steering policies](https://developers.cloudflare.com/load-balancing/understand-basics/traffic-steering/steering-policies/)
 
-[^17]: [mediasoup Documentation — SFU overview](https://mediasoup.org/documentation/overview/)
+[^17]: [Cloudflare Docs — Load Balancing monitors](https://developers.cloudflare.com/load-balancing/monitors/)
 
-[^18]: [Cloudflare Docs — Load Balancing monitors and health checks](https://developers.cloudflare.com/load-balancing/monitors/)
+[^18]: [Google Cloud Documentation — Cloud Load Balancing overview](https://docs.cloud.google.com/load-balancing/docs/load-balancing-overview)

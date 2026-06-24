@@ -11,14 +11,10 @@
             "id": "244306f9c2b67158",
             "type": "leaf",
             "state": {
-              "type": "markdown",
-              "state": {
-                "file": "README.md",
-                "mode": "preview",
-                "source": false
-              },
+              "type": "empty",
+              "state": {},
               "icon": "lucide-file",
-              "title": "README"
+              "title": "Новая вкладка"
             }
           }
         ]
@@ -186,6 +182,7 @@
   "active": "3ddd8ee0c387f949",
   "lastOpenFiles": [
     "README.md",
+    "meetflow_section_3_global_balancing_fixed.md",
     "meetflow_section_3_global_balancing.md",
     "README_итог.md",
     "README 1.md",
