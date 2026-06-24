@@ -45,8 +45,6 @@
     - [6.8. Кеш](#68-кеш)
     - [6.9. Денормализация и отказ от JOIN](#69-денормализация-и-отказ-от-join)
     - [6.10. Клиентские библиотеки](#610-клиентские-библиотеки)
-    - [6.11. Балансировка запросов](#611-балансировка-запросов)
-    - [6.12. Резервирование и бэкапы](#612-резервирование-и-бэкапы)
 - [Список источников](#список-источников)
 
 ## Основная часть
@@ -674,7 +672,7 @@ N*2 = N_base * 2
 
 Допущение для чата: `5` сообщений на одно участие во встрече. Тогда `300 млн * 5 = 1.5 млрд` сообщений/сутки, peak RPS = `52 083`.
 
-#### 6.7. API → запрос → БД
+#### 6.7. API -> запрос -> БД
 
 | API | Запрос к БД | Где выполняется | Индекс |
 | --- | ----------- | --------------- | ------ |
@@ -740,38 +738,6 @@ N*2 = N_base * 2
 | ScyllaDB | ScyllaDB C/C++ Driver / Cassandra CQL driver | Да | ScyllaDB поддерживает CQL-драйверы [^34] |
 | S3-compatible storage | AWS SDK for C++ | Да | Есть официальный AWS SDK for C++ [^39] |
 | PgBouncer | PostgreSQL protocol | Да | Для приложения это обычный PostgreSQL endpoint [^32] |
-
-#### 6.11. Балансировка запросов
-
-| Слой | Что делает | Где применяется |
-| ---- | ---------- | --------------- |
-| PgBouncer | Мультиплексирует PostgreSQL connections | `users`, `meetings`, `invite_links`, `recordings` |
-| Transaction pooling | Освобождает server connection после транзакции | Короткие API-запросы |
-| Read/write split | Запись в primary, чтение с replicas | `users`, `meetings`, `recordings` |
-| Citus coordinator | Маршрутизирует запрос в shard по distribution column | `meetings`, `invite_links`, `recordings` |
-| Redis Cluster | Делит ключи по hash slots | `sessions`, `runtime`, `chat_seq` |
-| ScyllaDB driver | Маршрутизирует CQL-запрос к нужным нодам | `participants`, `user_meetings`, `chat_messages` |
-
-#### 6.12. Резервирование и бэкапы
-
-| Хранилище | Резервирование | Бэкап | Комментарий |
-| --------- | -------------- | ----- | ----------- |
-| PostgreSQL `users` | `primary + 2 standby` | Full backup daily + WAL archive | Standby масштабирует чтение |
-| PostgreSQL + Citus | Shards + replicas | Snapshot shards + WAL | Запись масштабируется шардами |
-| Redis Cluster | Primary + replica per shard | RDB/AOF для sessions/runtime не критичен | Runtime можно пересобрать |
-| ScyllaDB | RF=3, CL=QUORUM для важных записей | Snapshot per node | Репликация задаётся RF |
-| S3-compatible storage | Erasure coding + cross-region copy | Versioning + lifecycle | Основной объём — записи встреч |
-| `recording_upload_buffer` | TTL + повторная загрузка чанков | Не бэкапим долгосрочно | Временный буфер |
-
-| Тип данных | RPO | RTO | Почему |
-| ---------- | --- | --- | ------ |
-| `users` | ≤ 5 минут | ≤ 30 минут | Критичные аккаунты |
-| `meetings` | ≤ 5 минут | ≤ 30 минут | Критичные метаданные |
-| `meeting_participants` | ≤ 15 минут | ≤ 30 минут | Можно частично восстановить из событий |
-| `meetings_runtime` | Потеря допустима | ≤ 5 минут | Кеш пересобирается |
-| `chat_messages` | ≤ 5 минут | ≤ 30 минут | Пользовательские данные |
-| `recordings` metadata | ≤ 5 минут | ≤ 30 минут | Нужны статусы записи |
-| Recording files | ≤ 24 часа | часы | Большой объектный объём |
 
 
 ---

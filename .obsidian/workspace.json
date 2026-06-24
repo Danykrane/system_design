@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "resource/physical-database-sql.md",
+                "file": "README.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "physical-database-sql"
+              "title": "README"
             }
           }
         ]
@@ -183,13 +183,13 @@
       "bases:Создать новую базу": false
     }
   },
-  "active": "3ddd8ee0c387f949",
+  "active": "c920438d826a4ee8",
   "lastOpenFiles": [
+    "resource/physical-database-sql.md",
+    "resource/icons/images/physical-database(1).svg",
     "resource/icons/images/physical-database.svg",
     "resource/icons/images/physical-database(2).svg",
-    "resource/physical-database-sql.md",
     "README.md",
-    "resource/icons/images/physical-database(1).svg",
     "resource/icons/images/logic-database.svg",
     "resource/icons/images/logic-database(2).svg",
     "resource/logic-database-sql.md",
