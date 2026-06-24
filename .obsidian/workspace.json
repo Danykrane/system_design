@@ -198,13 +198,14 @@
       "bases:Создать новую базу": false
     }
   },
-  "active": "02742dd183d9401f",
+  "active": "3ddd8ee0c387f949",
   "lastOpenFiles": [
-    "resource/physical-database-sql.md",
     "README.md",
+    "README.md",
+    "resource/icons/images/full-scheme.svg",
+    "resource/physical-database-sql.md",
     "README(2).md",
     "README(1).md",
-    "README 1.md",
     "resource/icons/images/physical-database(1).svg",
     "resource/icons/images/physical-database.svg",
     "resource/icons/images/physical-database(2).svg",

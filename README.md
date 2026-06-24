@@ -53,6 +53,12 @@
     - [8.1. Языки](#81-языки)
     - [8.2. Сводная таблица технологий](#82-сводная-таблица-технологий)
   - [9. Обеспечение надёжности](#9-обеспечение-надёжности)
+  - [10. Схема проекта](#10-схема-проекта)
+    - [10.1. Общая схема взаимодействия](#101-общая-схема-взаимодействия)
+    - [10.2. Как читать схему](#102-как-читать-схему)
+    - [10.3. Потоки данных](#103-потоки-данных)
+    - [10.4. Балансировка: внешняя и внутренняя](#104-балансировка-внешняя-и-внутренняя)
+    - [10.5. Вывод](#105-вывод)
 - [Список источников](#список-источников)
 
 ## Основная часть
@@ -942,6 +948,65 @@ flowchart TD
 | `ScyllaDB chat_scylla`            | `chat_messages`                    | append-only log + replication factor [^33]                                         | `RF=3`                       | сообщения читаются с реплик, запись продолжает работать при отказе ноды   |
 | `S3-compatible Object Storage`    | записи встреч и чанки              | multi-part upload, strong consistency, storage replication [^23][^24][^46]         | `>=3 copies`                 | файл остаётся доступен, незавершённые части можно дозагрузить             |
 | `Observability stack`             | метрики, логи, traces              | Prometheus/Grafana/OpenTelemetry/Loki/Jaeger в HA-режиме [^56][^57][^58][^59][^60] | `N+1 collectors`             | сервис работает, но алерты/дашборды деградируют                           |
+
+---
+
+### 10. Схема проекта
+
+#### 10.1. Общая схема взаимодействия
+
+
+![Схема взаимодействия сервисов MeetFlow](resource/icons/images/full-scheme.svg)
+
+#### 10.2. Как читать схему
+
+| Цвет | Что это | Компоненты |
+| ---- | ------- | ---------- |
+| Зелёный | Сеть и балансировка | `Global DNS / GTM`, `Anycast Edge`, `Provider L4 LB`, `Ingress L7` |
+| Синий | Сервисы приложения (stateless, C++23) | `Auth/Users API`, `Meeting Control Plane`, `WebSocket/Presence`, `Meeting Chat`, `Recording workers`, `SFU`, `PgBouncer` |
+| Оранжевый | Долговременные хранилища | `PostgreSQL`, `PostgreSQL + Citus`, `ScyllaDB`, `Object Storage` |
+| Фиолетовый | Кеш и hot-state | `Redis session_redis`, `Redis runtime_redis` |
+| Белый | Внешний участник и список ДЦ | `Клиент`, регион-чипы |
+| Серая стрелка | Поток данных | направление запроса / данных |
+
+| Уровень         | Назначение                        | Граница балансировки                        |
+| --------------- | --------------------------------- | ------------------------------------------- |
+| Глобальный      | Выбор ближайшего healthy ДЦ       | внешняя: DNS/GTM, Anycast                   |
+| ДЦ / Kubernetes | Приём трафика и stateless-сервисы | внутренняя: Provider L4 -> Ingress L7 / SFU |
+| Слой данных     | Хранение и hot-state              | шардинг + репликация, не L7                 |
+| Наблюдаемость   | Метрики, логи, traces             | side-stack, HA                              |
+
+#### 10.3. Потоки данных
+
+Все потоки начинаются у клиента и расходятся по доменам. Media-поток (RTP/SRTP) намеренно идёт мимо `Ingress L7` — через `Provider L4` прямо в `SFU`, чтобы не платить за SSL-termination на видеотрафике и держать встречу sticky к одному SFU-региону.
+
+|   № | Поток                         | Путь                                                  | Хранилище                                                               |
+| --: | ----------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------- |
+|   1 | Авторизация                   | `Client -> Ingress L7 -> Auth API`                    | `PostgreSQL auth_pg` + `Redis session_redis`                            |
+|   2 | Создание / вход во встречу    | `Client ->  Ingress L7 ->  Control Plane → PgBouncer` | `PG+Citus meeting_pg`, `ScyllaDB meeting_scylla`, `Redis runtime_redis` |
+|   3 | Presence / heartbeat          | `Client ->  Ingress L7 ->  WebSocket/Presence`        | `Redis runtime_redis`                                                   |
+|   4 | Чат встречи                   | `Client ->  Ingress L7 ->  Meeting Chat`              | `Redis` (seq) + `ScyllaDB chat_scylla`                                  |
+|   5 | Media: видео / аудио / screen | `Client ->  Provider L4 ->  SFU` (sticky)             | Поток                                                                   |
+|   6 | Запись встречи                | `SFU -> Recording workers`                            | `Object Storage` (файлы) + `PG+Citus recording_pg` (метаданные)         |
+
+Упрощённый поток:
+
+```mermaid
+flowchart TD
+    C["Клиент"] --> DNS["DNS / GTM"]
+    DNS --> L4["Provider L4"]
+    L4 --> ING["Ingress L7"]
+    L4 --> SFU["SFU (media)"]
+    ING --> SVC["API · Control Plane · WS · Chat · Recording"]
+    SVC --> PGB["PgBouncer"]
+    PGB --> PG["PostgreSQL + Citus"]
+    SVC --> SC["ScyllaDB"]
+    SVC --> RD["Redis"]
+    SFU --> REC["Recording workers"]
+    REC --> OBJ["Object Storage"]
+```
+
+Запись использует multipart upload в object storage, метаданные пишутся отдельно в Citus [^46][^29]. Доступ к PostgreSQL во всех потоках идёт через PgBouncer, чтобы не держать тысячи прямых соединений [^32].
 
 ## Список источников
 
