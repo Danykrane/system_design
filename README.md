@@ -476,8 +476,9 @@ N*2 = N_base * 2
 Логическая схема не привязана к конкретной СУБД, шардингу и физическим индексам. В схему включены основные таблицы, кеши, runtime-состояние и файловые данные.
 
 ##### Логическая схема
+Для получения картинки использовался сервис [dbdiagram](https://dbdiagram.io/) с кодом из [этого файла](resource/database-sql)([интерактивная ссылка на работу](https://dbdiagram.io/d/logic-database-6a3bcd543b9b0de59965ea98)).
 
-![Логическая схема БД](pictures/logic-database.svg)
+![Логическая схема БД](resource/icons/images/logic-database.svg)
 
 ##### Группы данных
 
@@ -519,18 +520,18 @@ N*2 = N_base * 2
 
 ##### Таблицы, объём и нагрузка
 
-| Таблица | Строки / окно | Байт / строка | Объём | Read QPS peak | Write QPS peak | Основание |
-| ------- | ------------: | ------------: | ----: | ------------: | -------------: | --------- |
-| `users` | 320 000 000 | 256 B | 81.92 GB | 11 459 | formula | Чтение при `join`, запись = регистрации/профиль |
-| `user_sessions` | 115 000 000 | 128 B | 14.72 GB | 11 459 | 3 993 | 1 активная сессия на DAU |
-| `meetings` | 900 000 000 / 30 дней | 256 B | 230.4 GB | 21 876 | 1 042 | `create`, `join`, `leave`, `recording_metadata` |
-| `meeting_participants` | 9 000 000 000 / 30 дней | 128 B | 1.152 TB | 10 417 | 20 834 | `join + leave` |
-| `meeting_invite_links` | 900 000 000 / 30 дней | 128 B | 115.2 GB | 10 417 | 1 042 | 1 ссылка на встречу |
-| `user_meetings` | 9 000 000 000 / 30 дней | 128 B | 1.152 TB | formula | 20 834 | Быстрый список встреч пользователя |
-| `meetings_runtime` | 3 375 000 peak | 512 B | 1.73 GB | 1 360 417 | 1 370 834 | Heartbeat, online count, status |
-| `chat_messages` | formula | до 10 KB | formula | formula | formula | Частота чата не задана в открытых источниках; лимит сообщения есть [^6] |
-| `recordings` | 900 000 000 / 30 дней | 256 B + file | 230.4 GB metadata + 685.26 PB files | formula | 1 042 | Метаданные + файлы записей |
-| `recording_upload_buffer` | formula / TTL | `chunk_size` | formula | formula | formula | Буфер чанков до сборки итогового файла |
+| Таблица                   |      Строки / окно      | Байт / строка |                               Объём | Read QPS peak | Write QPS peak | Основание                                                               |
+| ------------------------- | :---------------------: | ------------: | ----------------------------------: | ------------: | -------------: | ----------------------------------------------------------------------- |
+| `users`                   |       320 000 000       |         256 B |                            81.92 GB |        11 459 |        formula | Чтение при `join`, запись = регистрации/профиль                         |
+| `user_sessions`           |       115 000 000       |         128 B |                            14.72 GB |        11 459 |          3 993 | 1 активная сессия на DAU                                                |
+| `meetings`                |  900 000 000 / 30 дней  |         256 B |                            230.4 GB |        21 876 |          1 042 | `create`, `join`, `leave`, `recording_metadata`                         |
+| `meeting_participants`    | 9 000 000 000 / 30 дней |         128 B |                            1.152 TB |        10 417 |         20 834 | `join + leave`                                                          |
+| `meeting_invite_links`    |  900 000 000 / 30 дней  |         128 B |                            115.2 GB |        10 417 |          1 042 | 1 ссылка на встречу                                                     |
+| `user_meetings`           | 9 000 000 000 / 30 дней |         128 B |                            1.152 TB |       formula |         20 834 | Быстрый список встреч пользователя                                      |
+| `meetings_runtime`        |     3 375 000 peak      |         512 B |                             1.73 GB |     1 360 417 |      1 370 834 | Heartbeat, online count, status                                         |
+| `chat_messages`           |         formula         |      до 10 KB |                             formula |       formula |        formula | Частота чата не задана в открытых источниках; лимит сообщения есть [^6] |
+| `recordings`              |  900 000 000 / 30 дней  |  256 B + file | 230.4 GB metadata + 685.26 PB files |       formula |          1 042 | Метаданные + файлы записей                                              |
+| `recording_upload_buffer` |      formula / TTL      |  `chunk_size` |                             formula |       formula |        formula | Буфер чанков до сборки итогового файла                                  |
 
 #### 5.3. Требования к консистентности
 
