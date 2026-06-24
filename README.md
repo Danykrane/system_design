@@ -59,6 +59,11 @@
     - [10.3. Потоки данных](#103-потоки-данных)
     - [10.4. Балансировка: внешняя и внутренняя](#104-балансировка-внешняя-и-внутренняя)
     - [10.5. Вывод](#105-вывод)
+  - [11. Список серверов](#11-список-серверов)
+    - [11.1. Начальные нормативы для расчёта ресурсов](#111-начальные-нормативы-для-расчёта-ресурсов)
+    - [11.2. Расчёт ресурсов по сервисам](#112-расчёт-ресурсов-по-сервисам)
+    - [11.3. Итоговая таблица серверов](#113-итоговая-таблица-серверов)
+    - [11.4. Оценка стоимости инфраструктуры](#114-оценка-стоимости-инфраструктуры)
 - [Список источников](#список-источников)
 
 ## Основная часть
@@ -1008,6 +1013,104 @@ flowchart TD
 
 Запись использует multipart upload в object storage, метаданные пишутся отдельно в Citus [^46][^29]. Доступ к PostgreSQL во всех потоках идёт через PgBouncer, чтобы не держать тысячи прямых соединений [^32].
 
+### 11. Список серверов
+
+#### 11.1. Начальные нормативы для расчёта ресурсов
+
+| Компонент | Норматив / бенчмарк | Как используется | Источник |
+| --------- | -------------------- | ---------------- | -------- |
+| `DC-US-NA`, `DC-JP-TOKYO`, `DC-IN-MUMBAI`, `DC-UK-LONDON`, `OTHER_POOL` | Логические пулы из SVG; у Selectel публично доступны 4 страны, 6 регионов, 11 зон доступности и 26 пулов | Названия ДЦ оставлены как в схеме; физическая цена берётся по публичным конфигурациям Selectel | [^64][^65] |
+| `Kubernetes-кластер/3 зоны доступности` | Managed Kubernetes HA: 3 master-ноды | Считаем по одному HA-кластеру на логический пул | [^69] |
+| `L4-балансировщик` | Продвинутый балансировщик с резервированием | 1 HA-балансировщик на логический пул | [^67] |
+| `Ingress L7 (NGINX)` | 58 811 SSL TPS; 10 274 HTTPS CPS; 8.8 Gbps | Расчёт количества L7-узлов | [^19][^20] |
+| `Пул SFU (медиа)` | 10 Gbps на 1 SFU-узел | Расчёт количества media-серверов по peak bandwidth | [^66][^71] |
+| `Воркеры записи` | 10 Gbps на 1 recording-узел | Расчёт воркеров по peak recording ingest | [^66][^71] |
+| `Redis session_redis/TTL` | Raw size `14.72 GB`; запас `×4`; RF=2 | Размер кластера сессий | [^31] |
+| `Redis runtime_redis/горячие данные` | Peak `1 350 000 ops/s`; 1 shard ≈ `120 000 ops/s` | `12 master + 12 replica` | [^31] |
+| `ScyllaDB meeting_scylla/RF=3` | `2.304 TB raw`; RF=3 | Участники и списки встреч | [^33] |
+| `ScyllaDB chat_scylla/RF=3` | `45 TB raw / 30 дней`; RF=3 | Сообщения чата | [^33] |
+| `Объектное хранилище S3 / ≥3 копий` | `685.26 PB / 30 дней`; `0.81 ₽/GB/мес` | Стоимость записей встреч | [^70] |
+| `Cloud Server custom flavor` | `1 vCPU = 668.35 ₽/мес`; `1 GB RAM = 243.04 ₽/мес`; `1 GB SSD = 9.53 ₽/мес` | Цена кастомных app-узлов | [^67][^68] |
+| `EL11-SSD-10GE` | 6 ядер, 32 GB RAM, 2×480 GB SSD, 10GE, 14 000 ₽/мес | SFU и recording workers | [^66] |
+| `CL34-NVMe` | 14 ядер, 64 GB RAM, 2×1 TB NVMe, 13 600 ₽/мес | app pool, Redis runtime, observability | [^66] |
+| `CL62R-NVMe` | 8 ядер, 128 GB RAM, 2×1 TB NVMe, 20 900 ₽/мес | Redis session pool | [^66] |
+| `BL18-NVMe` | 16 ядер, 128 GB RAM, NVMe, 34 900 ₽/мес | PostgreSQL/Citus и Scylla meeting | [^66] |
+| `Selectel PL70-NVMe-10GE` | 32 ядра, 256 GB RAM, NVMe, 10GE, 88 600 ₽/мес | Scylla chat | [^66] |
+| `$` для внешних логических пулов | `$1 = 80 ₽` | Если логический пул вне РФ, цена переводится в рубли | Задано в задании |
+| Актуальность цен | Прайс Selectel открыт 24.06.2026; с 01.07.2026 заявлено изменение части цен | В README зафиксирована оценка на дату расчёта | [^67] |
+
+#### 11.2. Расчёт ресурсов по сервисам
+
+| Сервис | Пиковая нагрузка | Расчёт | Итоговые ресурсы | Источник |
+| ------ | ---------------- | ------ | ---------------- | -------- |
+| `DNS / GTM (глобальный)` | 5 логических пулов | Managed-сервис; серверы не выделяются | 0 серверов | [^64][^65] |
+| `Anycast-edge` | API/WSS front door | Managed-сетевой слой; серверы не выделяются | 0 серверов | [^64][^65] |
+| `L4-балансировщик` | 5 логических пулов | `1 HA LB * 5` | 5 managed LB | [^67] |
+| `Ingress L7 (NGINX)` | `1 372 918 RPS`, `22 918 CPS`, `10.98 Gbps` | `N+1` по ДЦ из пункта 4.6 | 31 pod × `24 CPU / 32 GB` | [^19][^20] |
+| `Пул SFU (медиа)` | `156 262.5 Gbps` | `ceil(156 262.5 / 10) + N+1 по пулам` | 15 632 сервера × `6 CPU / 32 GB / 10GE` | [^66][^71] |
+| `Аутентификация Users API` | `11 459 read QPS peak` | `ceil(11 459 / 1 000) + запас` | 15 pod × `4 CPU / 8 GB` | расчёт по п. 5.2 |
+| `Управление встречами` | `22 918 peak events/s` | `ceil(22 918 / 1 500) + запас` | 20 pod × `4 CPU / 8 GB` | расчёт по п. 2.4 |
+| `WebSocket / присутствие` | `1 350 000 heartbeat RPS` | `ceil(1 350 000 / 50 000) + запас` | 35 pod × `4 CPU / 8 GB` | расчёт по п. 2.4 |
+| `Чат встречи` | `52 083 msg/s peak` | `ceil(52 083 / 5 000) + запас` | 14 pod × `4 CPU / 8 GB` | расчёт по п. 6.6 |
+| `Воркеры записи` | `6 346 Gbps peak ingest` | `ceil(6 346 / 10) + запас` | 640 pod × `6 CPU / 32 GB / 10GE` | [^66][^71] |
+| `PgBouncer` | `users/meeting/recording_pg` connections | `3 pod * 5 пулов` | 15 pod × `2 CPU / 2 GB` | [^32] |
+| `Redis session_redis/TTL` | `115 млн` активных сессий | `14.72 GB raw * 4 * RF2` | 6 узлов × `8 CPU / 128 GB` | [^31] |
+| `Redis runtime_redis/горячие данные` | `1 350 000 ops/s` | `12 master + 12 replica` | 24 узла × `14 CPU / 64 GB` | [^31] |
+| `ScyllaDB meeting_scylla/RF=3` | `2.304 TB raw`, `≈41 668 write/s` | `2.304 TB * RF3 + запас` | 30 узлов × `16 CPU / 128 GB` | [^33] |
+| `ScyllaDB chat_scylla/RF=3` | `45 TB raw / 30 дней` | `45 TB * RF3 + запас` | 150 узлов × `32 CPU / 256 GB / 10GE` | [^33][^66] |
+| `Объектное хранилище S3 / ≥3 копий` | `685.26 PB / 30 дней` | `685 260 000 GB * 0.81 ₽` | Managed S3 | [^70] |
+| `PostgreSQL + Citus recording_pg/метаданные` | `230.4 GB metadata`, `1 042 write/s` | `6 workers + 3 coordinator/replica` | 9 узлов × `16 CPU / 128 GB` | [^27][^29] |
+| `PostgreSQL + Citus meeting_pg/шардинг` | `345.6 GB metadata`, `≈21 876 read/s` | `12 workers + 3 coordinator/replica` | 15 узлов × `16 CPU / 128 GB` | [^27][^29] |
+| `PostgreSQL auth_pg/primary + реплика` | `81.92 GB`, `11 459 read/s` | `1 primary + 1 replica` | 2 узла × `16 CPU / 128 GB` | [^27] |
+| `Prometheus` | Метрики всех сервисов | 5 HA-pod | 5 pod × `8 CPU / 32 GB` | [^56] |
+| `Grafana` | Дашборды | 2 HA-pod | 2 pod × `2 CPU / 4 GB` | [^57] |
+| `OpenTelemetry` | traces/logs/metrics ingest | 5 collector-pod | 5 pod × `4 CPU / 8 GB` | [^58] |
+| `Loki` | Логи | 5 HA-pod | 5 pod × `8 CPU / 32 GB` | [^59] |
+| `Jaeger` | Distributed tracing | 2 HA-pod | 2 pod × `4 CPU / 8 GB` | [^60] |
+
+#### 11.3. Итоговая таблица серверов
+
+| Пул / сервис | Размещение | Конфигурация одного сервера | Кол-во | Итого CPU | Итого RAM | Расчёт сетевых карт | Что размещается | Источник |
+| ------------ | ---------- | --------------------------- | -----: | --------: | --------: | ------------------- | --------------- | -------- |
+| `Kubernetes-кластер/3 зоны доступности` | 5 логических пулов | Managed Kubernetes HA | 5 | — | — | сеть провайдера | master-ноды Kubernetes | [^69] |
+| `L4-балансировщик` | 5 логических пулов | Managed LB advanced HA | 5 | — | — | provider HA | `L4-балансировщик` | [^67] |
+| `Ingress L7 (NGINX)` | Kubernetes worker pool | `24 vCPU / 32 GB / 100 GB SSD` | 31 | 744 | 992 GB | `10.98 Gbps / 31 = 0.35 Gbps` на узел | `Ingress L7 (NGINX)` | [^19][^20][^67] |
+| `Kubernetes app pool` | Kubernetes worker pool | `CL34-NVMe`: 14 CPU, 64 GB RAM | 36 | 504 | 2 304 GB | 1 Gbps на узел достаточно для control-plane | `Аутентификация Users API`, `Управление встречами`, `WebSocket / присутствие`, `Чат встречи`, `PgBouncer` | [^66] |
+| `Пул SFU (медиа)` | media pool | `EL11-SSD-10GE`: 6 CPU, 32 GB RAM, 10GE | 15 632 | 93 792 | 500 224 GB | `15 632 * 10 = 156 320 Gbps` | `Пул SFU (медиа)` | [^66][^71] |
+| `Воркеры записи` | recording pool | `EL11-SSD-10GE`: 6 CPU, 32 GB RAM, 10GE | 640 | 3 840 | 20 480 GB | `640 * 10 = 6 400 Gbps` | `Воркеры записи` | [^66][^71] |
+| `Redis session_redis/TTL` | data pool | `CL62R-NVMe`: 8 CPU, 128 GB RAM | 6 | 48 | 768 GB | 1 Gbps на узел | `Redis session_redis/TTL` | [^31][^66] |
+| `Redis runtime_redis/горячие данные` | data pool | `CL34-NVMe`: 14 CPU, 64 GB RAM | 24 | 336 | 1 536 GB | 1 Gbps на узел | `Redis runtime_redis/горячие данные` | [^31][^66] |
+| `PostgreSQL auth_pg/primary + реплика` | data pool | `BL18-NVMe`: 16 CPU, 128 GB RAM | 2 | 32 | 256 GB | 1 Gbps на узел | `PostgreSQL auth_pg/primary + реплика` | [^27][^66] |
+| `PostgreSQL + Citus meeting_pg/шардинг` | data pool | `BL18-NVMe`: 16 CPU, 128 GB RAM | 15 | 240 | 1 920 GB | 1 Gbps на узел | `PostgreSQL + Citus meeting_pg/шардинг` | [^27][^29][^66] |
+| `PostgreSQL + Citus recording_pg/метаданные` | data pool | `BL18-NVMe`: 16 CPU, 128 GB RAM | 9 | 144 | 1 152 GB | 1 Gbps на узел | `PostgreSQL + Citus recording_pg/метаданные` | [^27][^29][^66] |
+| `ScyllaDB meeting_scylla/RF=3` | data pool | `BL18-NVMe`: 16 CPU, 128 GB RAM | 30 | 480 | 3 840 GB | 1 Gbps на узел | `ScyllaDB meeting_scylla/RF=3` | [^33][^66] |
+| `ScyllaDB chat_scylla/RF=3` | data pool | `Selectel PL70-NVMe-10GE`: 32 CPU, 256 GB RAM, 10GE | 150 | 4 800 | 38 400 GB | `150 * 10 = 1 500 Gbps` | `ScyllaDB chat_scylla/RF=3` | [^33][^66] |
+| `Объектное хранилище S3 / ≥3 копий` | Selectel S3 | Managed S3 | — | — | — | сеть object storage | `Объектное хранилище S3 / ≥3 копий` | [^70] |
+| `Наблюдаемость (HA, N+1)` | observability pool | `CL34-NVMe`: 14 CPU, 64 GB RAM | 12 | 168 | 768 GB | 1 Gbps на узел | `Prometheus`, `Grafana`, `OpenTelemetry`, `Loki`, `Jaeger` | [^56][^57][^58][^59][^60][^66] |
+
+#### 11.4. Оценка стоимости инфраструктуры
+
+| Пул / сервис | Кол-во | Требуемая конфигурация из расчёта | Ближайшая публичная конфигурация Selectel | Цена за 1 узел / мес. | Итого / мес. | Комментарий |
+| ------------ | -----: | --------------------------------- | ----------------------------------------- | --------------------: | -----------: | ----------- |
+| `Kubernetes-кластер/3 зоны доступности` | 5 | HA master-ноды | Managed Kubernetes HA, 3 master-ноды | 15 532.36 ₽ | 77 661.80 ₽ | По 1 HA-кластеру на логический пул [^69] |
+| `L4-балансировщик` | 5 | HA L4/L7 вход | Балансировщик «Продвинутый с резервированием» | 3 944.59 ₽ | 19 722.95 ₽ | По 1 LB на логический пул [^67] |
+| `Ingress L7 (NGINX)` | 31 | `24 vCPU / 32 GB / 100 GB SSD` | Cloud Server custom flavor | 24 770.68 ₽ | 767 891.08 ₽ | `24*668.35 + 32*243.04 + 100*9.53` [^67] |
+| `Kubernetes app pool` | 36 | `≈504 CPU / 2.3 TB RAM` | `CL34-NVMe` | 13 600 ₽ | 489 600 ₽ | API, WS, chat, PgBouncer [^66] |
+| `Пул SFU (медиа)` | 15 632 | `156 262.5 Gbps` | `EL11-SSD-10GE` | 14 000 ₽ / $175 | 218 848 000 ₽ | Внешние логические пулы пересчитаны по `$1=80 ₽` [^66] |
+| `Воркеры записи` | 640 | `6 346 Gbps ingest` | `EL11-SSD-10GE` | 14 000 ₽ / $175 | 8 960 000 ₽ | Внешние логические пулы пересчитаны по `$1=80 ₽` [^66] |
+| `Redis session_redis/TTL` | 6 | `RF2`, запас по RAM | `CL62R-NVMe` | 20 900 ₽ | 125 400 ₽ | 6 узлов под сессии [^66] |
+| `Redis runtime_redis/горячие данные` | 24 | `12 master + 12 replica` | `CL34-NVMe` | 13 600 ₽ | 326 400 ₽ | Узкое место — ops/s [^31][^66] |
+| `PostgreSQL auth_pg/primary + реплика` | 2 | `primary + replica` | `BL18-NVMe` | 34 900 ₽ | 69 800 ₽ | Профили и auth [^66] |
+| `PostgreSQL + Citus meeting_pg/шардинг` | 15 | `12 workers + 3 coordinator/replica` | `BL18-NVMe` | 34 900 ₽ | 523 500 ₽ | Метаданные встреч [^66] |
+| `PostgreSQL + Citus recording_pg/метаданные` | 9 | `6 workers + 3 coordinator/replica` | `BL18-NVMe` | 34 900 ₽ | 314 100 ₽ | Метаданные записей [^66] |
+| `ScyllaDB meeting_scylla/RF=3` | 30 | `RF=3`, запас по write | `BL18-NVMe` | 34 900 ₽ | 1 047 000 ₽ | Participants + user meetings [^33][^66] |
+| `ScyllaDB chat_scylla/RF=3` | 150 | `135 TB replicated` | `Selectel PL70-NVMe-10GE` | 88 600 ₽ | 13 290 000 ₽ | Chat append-only log [^66] |
+| `Объектное хранилище S3 / ≥3 копий` | 685 260 000 GB | `685.26 PB / 30 дней` | S3 ледяное хранение | 0.81 ₽/GB | 555 060 600 ₽ | Только хранение, без GET/PUT/egress [^70] |
+| `Наблюдаемость (HA, N+1)` | 12 | `Prometheus`, `Grafana`, `OpenTelemetry`, `Loki`, `Jaeger` | `CL34-NVMe` | 13 600 ₽ | 163 200 ₽ | Отдельный observability pool [^66] |
+| **Итого** | — | — | — | — | **800 082 875.83 ₽/мес** | **≈ $10 001 035.95/мес при `$1=80 ₽`** |
+
+---
+
 ## Список источников
 
 [^1]: [Microsoft Tech Community — Teams Grows to 320 Million Monthly Active Users](https://techcommunity.microsoft.com/discussions/microsoftteams/teams-grows-to-320-million-monthly-active-users/3964746)
@@ -1135,3 +1238,19 @@ flowchart TD
 [^62]: [ScyllaDB Documentation — CQL Reference](https://docs.scylladb.com/manual/stable/cql/)
 
 [^63]: [Kubernetes Documentation — Self-Healing](https://kubernetes.io/docs/concepts/architecture/self-healing/)
+
+[^64]: [Selectel Documentation — Локации: страны, регионы, зоны доступности, пулы и адреса дата-центров](https://docs.selectel.ru/infrastructure/locations/)
+
+[^65]: [Selectel Documentation — Availability Matrix](https://docs.selectel.ru/en/infrastructure/availability-matrix/)
+
+[^66]: [Selectel — Тарифы и цены на услуги: выделенные серверы](https://selectel.ru/prices/)
+
+[^67]: [Selectel — Тарифы и цены на услуги: облачные серверы и балансировщики](https://selectel.ru/prices/)
+
+[^68]: [Selectel Documentation — Cloud Server Configurations](https://docs.selectel.ru/en/cloud-servers/create/configurations/)
+
+[^69]: [Selectel — Тарифы и цены на услуги: Managed Kubernetes](https://selectel.ru/prices/)
+
+[^70]: [Selectel — Тарифы и цены на услуги: S3](https://selectel.ru/prices/)
+
+[^71]: [Selectel Documentation — Dedicated server traffic consumption model](https://docs.selectel.ru/en/dedicated/networks/traffic-plans/)
