@@ -45,6 +45,14 @@
     - [6.8. Кеш](#68-кеш)
     - [6.9. Денормализация и отказ от JOIN](#69-денормализация-и-отказ-от-join)
     - [6.10. Клиентские библиотеки](#610-клиентские-библиотеки)
+  - [7. Алгоритмы](#7-алгоритмы)
+    - [7.1. Список алгоритмов](#71-список-алгоритмов)
+    - [7.2. Adaptive Bitrate](#72-adaptive-bitrate)
+    - [7.3. Выбор SFU-слоя видео](#73-выбор-sfu-слоя-видео)
+    - [7.4. Active Speaker Detection](#74-active-speaker-detection)
+    - [7.5. Jitter Buffer и синхронизация аудио/видео](#75-jitter-buffer-и-синхронизация-аудиовидео)
+    - [7.6. Идемпотентные события входа и выхода](#76-идемпотентные-события-входа-и-выхода)
+    - [7.7. Загрузка и финализация записи](#77-загрузка-и-финализация-записи)
 - [Список источников](#список-источников)
 
 ## Основная часть
@@ -742,6 +750,359 @@ N*2 = N_base * 2
 
 ---
 
+
+### 7. Алгоритмы
+
+В раздел включены только алгоритмы, которые влияют на нагрузку, БД, media plane и взаимодействие сервисов.
+
+#### 7.1. Список алгоритмов
+
+| Алгоритм | Где используется | Коротко | На что влияет |
+| -------- | ---------------- | ------- | ------------- |
+| Adaptive Bitrate | Media Plane / SFU | меняем качество под сеть участника | bandwidth, CPU клиента, SFU-routing |
+| Выбор SFU-слоя видео | SFU | подписчику отдаётся нужный слой 1080p/720p/480p | исходящий трафик SFU |
+| Active Speaker Detection | UI встречи / SFU | определяем говорящего участника | раскладка видео, приоритет качества |
+| Jitter Buffer + A/V Sync | клиентское воспроизведение | сглаживаем задержки и синхронизируем звук/видео | качество звонка, client metrics |
+| Идемпотентные join/leave | Meeting Control Plane | повторные события не ломают состояние | консистентность участников и счётчиков |
+| Загрузка и финализация записи | Recording | пишем запись чанками и собираем итоговый файл | object storage, статусы записи |
+
+---
+
+#### 7.2. Adaptive Bitrate
+
+| Параметр | Значение |
+| -------- | -------- |
+| Блок | `Media Plane / SFU` |
+| Задача | Подобрать качество видео под текущую сеть участника |
+| Вход | `packet_loss`, `RTT`, `jitter`, `available_bitrate`, `frames_dropped`, `audio_quality` |
+| Ограничение | Звук важнее видео; понижение быстрое, повышение плавное |
+| Результат | `target_profile = 1080p / 720p / 480p / audio_only` |
+
+Метрики берутся из WebRTC stats API, для congestion control используются RTCP feedback-метрики по потерям и времени доставки пакетов [^40][^41]. Базовый профиль 720p опирается на bandwidth-оценку Zoom [^5].
+
+| Альтернатива | Минус | Решение |
+| ------------ | ----- | ------- |
+| Всегда 720p | При плохой сети звонок рвётся | Не подходит |
+| Только клиент решает качество | SFU хуже управляет исходящим трафиком | Не выбираем |
+| Server-guided ABR | SFU видит подписчиков и управляет слоями | **Выбрано** |
+
+Алгоритм:
+
+1. Клиент раз в `1 сек` отправляет media stats.
+2. SFU считает состояние сети: потери, RTT, jitter, доступная полоса.
+3. Если сеть плохая — профиль снижается сразу.
+4. Если сеть стабильна — профиль повышается на одну ступень.
+5. Если страдает audio — video снижается первым.
+6. Новый профиль применяется к подписке участника.
+
+| Структура | Где | Поля |
+| --------- | --- | ---- |
+| `participant_network_stats` | memory / metrics pipeline | `meeting_id`, `user_id`, `loss`, `rtt`, `jitter`, `bitrate` |
+| `participant_media_profile` | SFU memory | `meeting_id`, `user_id`, `target_profile`, `updated_at` |
+| `meetings_runtime` | Redis Cluster | `meeting_id`, `active_profile_count`, `audio_degraded_count` |
+
+```mermaid
+flowchart TD
+    A[Клиент отправляет media stats] --> B[SFU оценивает loss, RTT, jitter, bitrate]
+    B --> C{Есть проблемы со звуком?}
+    C -- Да --> D[Снизить видео до audio priority]
+    C -- Нет --> E{Сеть ухудшилась?}
+    E -- Да --> F[Понизить профиль сразу]
+    E -- Нет --> G{Есть запас по bitrate?}
+    G -- Да --> H[Повысить профиль на 1 ступень]
+    G -- Нет --> I[Оставить профиль]
+    D --> J[Применить target_profile]
+    F --> J
+    H --> J
+    I --> J
+    J --> A
+```
+
+| Влияние | Что меняется |
+| ------- | ------------ |
+| БД | Постоянные таблицы не меняются |
+| Redis | В `meetings_runtime` можно хранить агрегаты качества |
+| SFU | Нужна per-participant media state |
+| Нагрузка | Снижается video download при плохой сети |
+
+---
+
+#### 7.3. Выбор SFU-слоя видео
+
+| Параметр | Значение |
+| -------- | -------- |
+| Блок | `Media Plane / SFU` |
+| Задача | Не транскодировать видео, а выбирать готовый слой |
+| Вход | `target_profile`, `viewport`, `active_speaker`, доступные encodings |
+| Ограничение | SFU не должен превращаться в MCU с высоким CPU |
+| Результат | `selected_layer` для каждого подписчика |
+
+SFU-подход выбран потому, что media-сервер маршрутизирует RTP-потоки между участниками, а не смешивает их в один общий поток [^14]. Для нескольких качеств используется simulcast / SVC: отправитель публикует несколько encodings, SFU выбирает нужный слой [^42].
+
+| Альтернатива | Минус | Решение |
+| ------------ | ----- | ------- |
+| Single stream | Всем отдаётся одно качество | Плохо для слабой сети |
+| MCU transcoding | Высокая CPU-нагрузка | Не подходит для highload |
+| SFU + simulcast/SVC | Больше upload от говорящего, зато меньше CPU на сервере | **Выбрано** |
+
+Алгоритм:
+
+1. Клиент публикует несколько video layers.
+2. SFU хранит список доступных слоёв для producer.
+3. Для каждого consumer считается `target_profile`.
+4. Активному говорящему и крупной плитке даётся слой выше.
+5. Миниатюрам даётся слой ниже.
+6. При деградации сети SFU переключает consumer на слой ниже.
+
+| Структура | Где | Поля |
+| --------- | --- | ---- |
+| `producer_layers` | SFU memory | `producer_id`, `rid`, `width`, `height`, `max_bitrate` |
+| `consumer_subscription` | SFU memory | `consumer_id`, `producer_id`, `selected_layer` |
+| `participant_media_profile` | SFU memory | `user_id`, `target_profile`, `reason` |
+
+```mermaid
+flowchart TD
+    A[Publisher отправляет video layers] --> B[SFU хранит available layers]
+    C[Subscriber имеет target_profile] --> D[SFU выбирает layer]
+    B --> D
+    D --> E{Крупная плитка или active speaker?}
+    E -- Да --> F[Выбрать слой выше]
+    E -- Нет --> G[Выбрать слой ниже]
+    F --> H[Отправить consumer stream]
+    G --> H
+```
+
+| Влияние | Что меняется |
+| ------- | ------------ |
+| БД | Не требуется новая persistent-таблица |
+| SFU | Нужна таблица подписок `consumer -> producer -> layer` |
+| Сеть | Снижается исходящий трафик SFU |
+| CPU | Нет постоянного transcoding на сервере |
+
+---
+
+#### 7.4. Active Speaker Detection
+
+| Параметр | Значение |
+| -------- | -------- |
+| Блок | `Media Plane / UI встречи` |
+| Задача | Определить участника, который сейчас говорит |
+| Вход | audio level от producers, `meeting_id`, `user_id` |
+| Ограничение | Нельзя переключать говорящего слишком часто |
+| Результат | `dominant_speaker_user_id` |
+
+В mediasoup для этого есть `ActiveSpeakerObserver`, который отслеживает активность audio producers [^43]. В MeetFlow поверх него используется hysteresis, чтобы UI не мигал при коротких паузах.
+
+| Альтернатива | Минус | Решение |
+| ------------ | ----- | ------- |
+| Определять на клиенте | У разных клиентов будет разный главный speaker | Не выбираем |
+| Серверный audio observer | Единое решение для всех участников | **Выбрано** |
+| ML-модель по аудио | Сложно и дорого для MVP | Не нужно |
+
+Алгоритм:
+
+1. SFU получает audio level по участникам.
+2. Для каждого участника обновляется `speaker_score`.
+3. Короткие всплески сглаживаются окном.
+4. Если новый score выше текущего speaker дольше порога — speaker меняется.
+5. Событие отправляется клиентам через WebSocket.
+6. UI выделяет говорящего и может запросить слой видео выше.
+
+| Структура | Где | Поля |
+| --------- | --- | ---- |
+| `speaker_score` | SFU memory | `meeting_id`, `user_id`, `score`, `last_voice_at` |
+| `dominant_speaker` | `meetings_runtime` / Redis | `meeting_id`, `user_id`, `updated_at` |
+| `speaker_changed_event` | WebSocket | `meeting_id`, `old_user_id`, `new_user_id` |
+
+```mermaid
+flowchart TD
+    A[Audio producers] --> B[SFU Audio Observer]
+    B --> C[Считать speaker_score]
+    C --> D{Новый score стабильно выше?}
+    D -- Нет --> E[Оставить speaker]
+    D -- Да --> F[Обновить dominant_speaker]
+    F --> G[Отправить WS event клиентам]
+    G --> H[UI выделяет говорящего]
+    E --> A
+    H --> A
+```
+
+| Влияние | Что меняется |
+| ------- | ------------ |
+| Redis | Можно хранить текущего speaker в `meetings_runtime` |
+| WebSocket | Добавляется событие `speaker_changed` |
+| SFU | Active speaker влияет на выбор video layer |
+| Нагрузка | Меньше full-quality video для неактивных плиток |
+
+---
+
+#### 7.5. Jitter Buffer и синхронизация аудио/видео
+
+| Параметр | Значение |
+| -------- | -------- |
+| Блок | Клиентское воспроизведение |
+| Задача | Сгладить неровную доставку пакетов и совместить audio/video |
+| Вход | RTP `sequence_number`, RTP `timestamp`, arrival time, RTCP Sender Report |
+| Ограничение | Большой буфер повышает задержку, маленький даёт рывки |
+| Результат | Стабильное воспроизведение с минимальной задержкой |
+
+RTP использует sequence number и timestamp, а для синхронизации разных media-потоков RTCP Sender Report связывает RTP timestamp с NTP time [^44]. WebRTC stats также содержит jitter buffer-метрики, которые можно отправлять в monitoring [^40].
+
+| Альтернатива | Минус | Решение |
+| ------------ | ----- | ------- |
+| Почти без буфера | Много рывков при jitter | Не подходит |
+| Большой фиксированный буфер | Высокая задержка | Не подходит для звонков |
+| Адаптивный jitter buffer | Баланс задержки и плавности | **Выбрано** |
+
+Алгоритм:
+
+1. Клиент принимает RTP-пакеты.
+2. Пакеты сортируются по `sequence_number`.
+3. Опоздавшие пакеты отбрасываются после deadline.
+4. Target delay меняется по jitter и packet loss.
+5. Audio берётся как главный clock.
+6. Video подгоняется по RTCP NTP/RTP mapping.
+
+| Структура | Где | Поля |
+| --------- | --- | ---- |
+| `rtp_packet_buffer` | client memory | `ssrc`, `seq`, `rtp_ts`, `arrival_ts`, `payload` |
+| `sync_context` | client memory | `audio_clock`, `video_clock`, `rtcp_sr_mapping` |
+| `playout_stats` | metrics pipeline | `jitter_buffer_delay`, `dropped_frames`, `freeze_count` |
+
+```mermaid
+flowchart TD
+    A[RTP packets] --> B[Сортировка по sequence_number]
+    B --> C[Adaptive jitter buffer]
+    C --> D{Пакет успел до deadline?}
+    D -- Нет --> E[Drop late packet]
+    D -- Да --> F[Decode]
+    F --> G[Sync по audio clock и RTCP SR]
+    G --> H[Playout]
+    E --> H
+```
+
+| Влияние | Что меняется |
+| ------- | ------------ |
+| БД | Не влияет |
+| Клиент | Нужна память под RTP buffer |
+| Monitoring | Добавляются client media metrics |
+| Архитектура | Media quality анализируется отдельно от control-plane RPS |
+
+---
+
+#### 7.6. Идемпотентные события входа и выхода
+
+| Параметр | Значение |
+| -------- | -------- |
+| Блок | `Meeting Control Plane` |
+| Задача | Повторный `join/leave` не должен создавать дубли и ломать счётчики |
+| Вход | `event_id`, `meeting_id`, `user_id`, `session_id`, `event_type` |
+| Ограничение | Клиент может повторить запрос после timeout |
+| Результат | Одно логическое состояние участника |
+
+Идемпотентный подход нужен для безопасных retry: клиент передаёт уникальный ключ, сервер распознаёт повтор и не выполняет действие второй раз [^45]. Для runtime-состояния используются TTL-ключи Redis: после истечения timeout ключ удаляется автоматически [^22].
+
+| Альтернатива | Минус | Решение |
+| ------------ | ----- | ------- |
+| Каждый `join` как новая строка | Дубли участников | Не подходит |
+| Только клиентская защита от повторов | Не работает при retry/network timeout | Не подходит |
+| Idempotency key + upsert | Повторы безопасны | **Выбрано** |
+
+Алгоритм:
+
+1. Клиент отправляет `event_id` вместе с `join/leave`.
+2. API проверяет `processed_event:{event_id}`.
+3. Если событие уже обработано — возвращается прошлый результат.
+4. Если новое — обновляется `meeting_participants` по ключу `meeting_id + bucket + user_id`.
+5. Счётчик online меняется только при переходе состояния.
+6. Runtime TTL обновляется heartbeat-событиями.
+
+| Структура | Где | Поля |
+| --------- | --- | ---- |
+| `processed_event:{event_id}` | Redis TTL | `status`, `result`, `expires_at` |
+| `meeting_participants` | ScyllaDB | `meeting_id`, `bucket`, `user_id`, `state`, `last_event_id` |
+| `meetings_runtime` | Redis Cluster | `online_count`, `last_heartbeat_at` |
+
+```mermaid
+flowchart TD
+    A[POST join/leave с event_id] --> B{event_id уже был?}
+    B -- Да --> C[Вернуть сохранённый результат]
+    B -- Нет --> D[Upsert participant state]
+    D --> E{State реально изменился?}
+    E -- Нет --> F[Не менять счётчики]
+    E -- Да --> G[Обновить online_count]
+    F --> H[Сохранить processed_event TTL]
+    G --> H
+    H --> I[Вернуть результат]
+```
+
+| Влияние | Что меняется |
+| ------- | ------------ |
+| ScyllaDB | Нужен ключ `meeting_id + bucket + user_id` |
+| Redis | Нужны TTL-ключи для dedup событий |
+| Консистентность | Счётчики меняются только на state transition |
+| API | `join/leave` принимают `event_id` |
+
+---
+
+#### 7.7. Загрузка и финализация записи
+
+| Параметр | Значение |
+| -------- | -------- |
+| Блок | `Recording` |
+| Задача | Загрузить запись встречи без хранения больших файлов в SQL |
+| Вход | `recording_id`, `chunk_number`, `checksum`, `storage_key` |
+| Ограничение | Чанк может быть отправлен повторно |
+| Результат | Immutable recording object + metadata row |
+
+Cloud recording у аналога сохраняет видео, аудио и чат [^7]. Большие файлы пишутся в object storage multipart upload; S3-compatible подход поддерживает загрузку по частям и checksum-проверки [^46].
+
+| Альтернатива | Минус | Решение |
+| ------------ | ----- | ------- |
+| Писать файл в PostgreSQL | Очень большой объём | Не подходит |
+| Локальный диск recording worker | Сложно переживать падения worker | Не выбираем |
+| Object storage multipart upload | Масштабируется и поддерживает retry | **Выбрано** |
+
+Алгоритм:
+
+1. Recording worker создаёт `recording_id`.
+2. Поток записи режется на чанки.
+3. Каждый чанк загружается по ключу `recording_id/chunk_number`.
+4. Для чанка сохраняется checksum.
+5. Повторная загрузка того же чанка перезаписывает только тот же номер.
+6. После `last_chunk` выполняется финализация.
+7. В `recordings` обновляется `status = ready` и `storage_key`.
+
+| Структура | Где | Поля |
+| --------- | --- | ---- |
+| `recordings` | PostgreSQL + Citus | `id`, `meeting_id`, `status`, `storage_key`, `duration_sec` |
+| `recording_upload_buffer` | Object Storage + Redis TTL | `recording_id`, `chunk_number`, `checksum`, `expires_at` |
+| `recording_finalize_job` | queue / worker | `recording_id`, `chunks_count`, `target_key` |
+
+```mermaid
+flowchart TD
+    A[Recording worker] --> B[Разбить поток на chunks]
+    B --> C[PUT chunk в object storage]
+    C --> D[Сохранить checksum и номер чанка]
+    D --> E{Это последний chunk?}
+    E -- Нет --> B
+    E -- Да --> F[Проверить все chunks]
+    F --> G{Checksum OK?}
+    G -- Нет --> H[status = failed]
+    G -- Да --> I[Собрать итоговый object]
+    I --> J[recordings.status = ready]
+```
+
+| Влияние | Что меняется |
+| ------- | ------------ |
+| PostgreSQL | Только metadata и status записи |
+| Object Storage | Основной объём `685.26 PB / 30 дней` |
+| Redis TTL | Временный буфер чанков и дедуп |
+| API | Загрузка записи идёт отдельно от `POST /recordings/metadata` |
+
+
+---
+
 ## Список источников
 
 [^1]: [Microsoft Tech Community — Teams Grows to 320 Million Monthly Active Users](https://techcommunity.microsoft.com/discussions/microsoftteams/teams-grows-to-320-million-monthly-active-users/3964746)
@@ -821,3 +1182,17 @@ N*2 = N_base * 2
 [^38]: [redis-plus-plus — C++ Redis client](https://github.com/sewenew/redis-plus-plus)
 
 [^39]: [AWS Documentation — AWS SDK for C++](https://docs.aws.amazon.com/sdk-for-cpp/v1/developer-guide/welcome.html)
+
+[^40]: [W3C — Identifiers for WebRTC's Statistics API](https://www.w3.org/TR/webrtc-stats/)
+
+[^41]: [RFC 8888 — RTP Control Protocol Feedback for Congestion Control](https://www.rfc-editor.org/rfc/rfc8888.html)
+
+[^42]: [mediasoup Documentation — RTP Parameters and Capabilities](https://mediasoup.org/documentation/v3/mediasoup/rtp-parameters-and-capabilities/)
+
+[^43]: [mediasoup Documentation — ActiveSpeakerObserver API](https://mediasoup.org/documentation/v3/mediasoup/api/#ActiveSpeakerObserver)
+
+[^44]: [RFC 3550 — RTP: A Transport Protocol for Real-Time Applications](https://datatracker.ietf.org/doc/html/rfc3550)
+
+[^45]: [Stripe Docs — Idempotent requests](https://docs.stripe.com/api/idempotent_requests)
+
+[^46]: [Amazon S3 Documentation — Multipart upload overview](https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html)
