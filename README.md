@@ -52,6 +52,7 @@
   - [8. Технологии](#8-технологии)
     - [8.1. Языки](#81-языки)
     - [8.2. Сводная таблица технологий](#82-сводная-таблица-технологий)
+  - [9. Обеспечение надёжности](#9-обеспечение-надёжности)
 - [Список источников](#список-источников)
 
 ## Основная часть
@@ -915,6 +916,33 @@ flowchart TD
 | `Loki` | Логи | Централизованное хранение и поиск логов [^59] |
 | `Jaeger` | Distributed tracing | Поиск узких мест между микросервисами [^60] |
 
+---
+
+### 9. Обеспечение надёжности
+
+| Компонент системы                 | Что резервируем                    | Способ резервирования                                                              | Формула                      | При отказе                                                                |
+| --------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------- |
+| `Global DNS / GTM`                | выбор региона                      | health checks + latency/geo routing + веса пулов [^15][^16][^17]                   | `N_regions >= 2`             | новые пользователи уходят в healthy ДЦ                                    |
+| `Anycast Edge`                    | входной front door                 | один Anycast IP, несколько edge-точек [^18]                                        | `N_edges >= 2`               | маршрут перестраивается на ближайший доступный edge                       |
+| `Provider L4 LB`                  | TCP/UDP вход в ДЦ                  | managed HA у провайдера, Service `LoadBalancer` [^21]                              | provider HA                  | backend-ноды с ошибками исключаются из балансировки                       |
+| `NGINX L7 pool`                   | HTTPS/WSS, SSL Termination         | active-active, health checks, запас по SSL TPS [^19][^20]                          | `N+1`, для strict HA — `N*2` | трафик идёт на живые L7-балансировщики                                    |
+| `Kubernetes`                      | pods, nodes, deployments           | replicas, reschedule, self-healing [^54][^63]                                      | `replicas >= 2`, `N+1 nodes` | pod пересоздаётся, workload переезжает на живую ноду                      |
+| `Auth / Users API`                | логин, профиль, токены             | stateless pods + PostgreSQL HA [^27][^54]                                          | `N+1`                        | запрос повторяется на другой pod                                          |
+| `Meeting Control Plane`           | create/join/leave                  | stateless pods + закрепление встречи за `home_dc` [^54]                            | `N+1 per DC`                 | новые запросы идут на живые pods в том же ДЦ                              |
+| `WebSocket / Presence`            | heartbeat и online-state           | несколько WS-pods + Redis Cluster для runtime-state [^31][^54]                     | `N+1`                        | клиент переподключается, состояние читается из Redis                      |
+| `SFU media pool`                  | audio/video/screen sharing         | sticky meeting + health checks, SFU без смешивания потоков [^14][^42]              | `N+1 per DC`                 | новые встречи не выдаются на плохой SFU, старые доживают                  |
+| `Recording workers`               | сборка и финализация записи        | worker pool + retry + multipart upload [^46]                                       | `N+1`                        | незавершённая запись добирается другим worker                             |
+| `PostgreSQL auth_pg`              | `users`                            | primary + replica + WAL/PITR [^27][^28]                                            | `1 primary + 1 replica`      | failover на replica, восстановление через WAL                             |
+| `PostgreSQL + Citus meeting_pg`   | `meetings`, `meeting_invite_links` | шардирование по `meeting_id`/`token_hash` + реплики [^27][^29][^30]                | `RF=2 или RF=3`              | часть нагрузки уходит на реплики, shard восстанавливается из replica/PITR |
+| `PostgreSQL + Citus recording_pg` | metadata записей                   | distributed tables + replica + PITR [^27][^28][^29]                                | `RF=2 или RF=3`              | metadata восстанавливается, файлы остаются в object storage               |
+| `PgBouncer`                       | пул соединений PostgreSQL          | несколько PgBouncer-инстансов перед БД [^32]                                       | `N+1`                        | приложение переключается на живой pooler                                  |
+| `Redis session_redis`             | `user_sessions`                    | Redis Cluster: shards + replicas [^31]                                             | `3 master + 3 replica min`   | часть сессий может переподключиться к promoted replica                    |
+| `Redis runtime_redis`             | `meetings_runtime`, counters       | Redis Cluster + TTL для hot-state [^22][^31]                                       | `3 master + 3 replica min`   | heartbeat-state пересоздаётся клиентами после reconnect                   |
+| `ScyllaDB meeting_scylla`         | participants, user meetings        | replication factor + consistency level [^33]                                       | `RF=3`                       | node down не останавливает read/write при доступном quorum                |
+| `ScyllaDB chat_scylla`            | `chat_messages`                    | append-only log + replication factor [^33]                                         | `RF=3`                       | сообщения читаются с реплик, запись продолжает работать при отказе ноды   |
+| `S3-compatible Object Storage`    | записи встреч и чанки              | multi-part upload, strong consistency, storage replication [^23][^24][^46]         | `>=3 copies`                 | файл остаётся доступен, незавершённые части можно дозагрузить             |
+| `Observability stack`             | метрики, логи, traces              | Prometheus/Grafana/OpenTelemetry/Loki/Jaeger в HA-режиме [^56][^57][^58][^59][^60] | `N+1 collectors`             | сервис работает, но алерты/дашборды деградируют                           |
+
 ## Список источников
 
 [^1]: [Microsoft Tech Community — Teams Grows to 320 Million Monthly Active Users](https://techcommunity.microsoft.com/discussions/microsoftteams/teams-grows-to-320-million-monthly-active-users/3964746)
@@ -1041,3 +1069,4 @@ flowchart TD
 
 [^62]: [ScyllaDB Documentation — CQL Reference](https://docs.scylladb.com/manual/stable/cql/)
 
+[^63]: [Kubernetes Documentation — Self-Healing](https://kubernetes.io/docs/concepts/architecture/self-healing/)
