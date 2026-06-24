@@ -61,15 +61,6 @@ Table user_meetings {
   role varchar
 }
 
-Table meetings_runtime {
-  meeting_id uuid [pk, not null]
-  status varchar
-  participants_online_count integer
-  participants_total_count integer
-  sfu_pool varchar
-  updated_at datetime
-}
-
 Table chat_messages {
   id uuid [pk]
   meeting_id uuid [not null]
@@ -108,7 +99,6 @@ Ref: users.id < meeting_participants.user_id
 
 Ref: meetings.id < meeting_participants.meeting_id
 Ref: meetings.id < meeting_invite_links.meeting_id
-Ref: meetings.id - meetings_runtime.meeting_id
 Ref: meetings.id < recordings.meeting_id
 Ref: meetings.id < chat_messages.meeting_id
 Ref: meetings.id < user_meetings.meeting_id
