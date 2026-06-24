@@ -14,7 +14,7 @@
               "type": "markdown",
               "state": {
                 "file": "README.md",
-                "mode": "source",
+                "mode": "preview",
                 "source": false
               },
               "icon": "lucide-file",
@@ -185,8 +185,9 @@
   },
   "active": "244306f9c2b67158",
   "lastOpenFiles": [
-    "README 1.md",
+    "README_итог.md",
     "README.md",
+    "README 1.md",
     "README(7).md",
     "README(6).md",
     "README(4).md",
