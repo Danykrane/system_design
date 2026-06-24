@@ -52,8 +52,6 @@
   - [8. Технологии](#8-технологии)
     - [8.1. Языки](#81-языки)
     - [8.2. Сводная таблица технологий](#82-сводная-таблица-технологий)
-    - [8.3. Схема использования технологий](#83-схема-использования-технологий)
-    - [8.4. Итоговый стек](#84-итоговый-стек)
 - [Список источников](#список-источников)
 
 ## Основная часть
@@ -875,23 +873,18 @@ flowchart TD
 | CPU | Нет постоянного transcoding на сервере |
 
 ---
-
-
----
-
 ### 8. Технологии
 
 В раздел включены технологии, которые нужны для API, media plane, БД, деплоя и наблюдаемости.
 
 #### 8.1. Языки
 
-| Язык / стандарт | Где используется | Мотивационная часть |
-| --------------- | ---------------- | ------------------- |
-| `C++23` | Backend, control-plane, SFU, recording workers | Основной язык: высокая производительность, строгая типизация, современный стандарт [^47] |
-| `TypeScript` | Web-клиент и админка | Типизированный frontend, удобно работать с WebRTC API [^48] |
-| `SQL` | PostgreSQL / Citus | Транзакционные метаданные, индексы, миграции [^25][^26] |
-| `CQL` | ScyllaDB | Запросы по partition key для чата и участников [^62] |
-| `YAML` | Kubernetes / Helm | Декларативное описание деплоя и конфигурации [^54][^55] |
+| Язык / стандарт | Где используется                               | Мотивационная часть                                                                      |
+| --------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `C++23`         | Backend, control-plane, SFU, recording workers | Основной язык: высокая производительность, строгая типизация, современный стандарт [^47] |
+| `TypeScript`    | Web-клиент и админка                           | Типизированный frontend, удобно работать с WebRTC API [^48]                              |
+| `SQL`           | PostgreSQL / Citus                             | Транзакционные метаданные, индексы, миграции [^25][^26]                                  |
+| `CQL`           | ScyllaDB                                       | Запросы по partition key для чата и участников [^62]                                     |
 
 #### 8.2. Сводная таблица технологий
 
@@ -921,37 +914,6 @@ flowchart TD
 | `OpenTelemetry` | Instrumentation | Единый сбор traces, metrics, logs [^58] |
 | `Loki` | Логи | Централизованное хранение и поиск логов [^59] |
 | `Jaeger` | Distributed tracing | Поиск узких мест между микросервисами [^60] |
-
-#### 8.3. Схема использования технологий
-
-```mermaid
-flowchart TD
-    C["Web client<br/>TypeScript + WebRTC"] --> N["NGINX L7"]
-    N --> API["C++23 API / Control Plane"]
-    API --> PG["PostgreSQL + Citus"]
-    API --> R["Redis Cluster"]
-    API --> SC["ScyllaDB"]
-    C --> SFU["C++23 SFU / WebRTC"]
-    SFU --> S3["S3 Object Storage"]
-    API --> O["OpenTelemetry"]
-    SFU --> O
-    O --> P["Prometheus / Loki / Jaeger"]
-    P --> G["Grafana"]
-```
-
-#### 8.4. Итоговый стек
-
-| Контур | Выбор |
-| ------ | ----- |
-| Основной язык | `C++23` |
-| Frontend | `TypeScript + WebRTC` |
-| API / Control Plane | `C++23 + gRPC + PostgreSQL/Citus + Redis` |
-| Media Plane | `C++23 SFU + WebRTC + simulcast/SVC` |
-| Hot write data | `ScyllaDB` |
-| Записи встреч | `S3-compatible Object Storage + multipart upload` |
-| Edge | `NGINX L7 + Provider L4` |
-| Deploy | `Docker + Kubernetes + Helm` |
-| Observability | `Prometheus + Grafana + OpenTelemetry + Loki + Jaeger` |
 
 ## Список источников
 
