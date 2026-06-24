@@ -48,6 +48,12 @@
   - [7. Алгоритмы](#7-алгоритмы)
     - [7.1. Список алгоритмов](#71-список-алгоритмов)
     - [7.2. Adaptive Bitrate](#72-adaptive-bitrate)
+    - [7.3. Выбор SFU-слоя видео](#73-выбор-sfu-слоя-видео)
+  - [8. Технологии](#8-технологии)
+    - [8.1. Языки](#81-языки)
+    - [8.2. Сводная таблица технологий](#82-сводная-таблица-технологий)
+    - [8.3. Схема использования технологий](#83-схема-использования-технологий)
+    - [8.4. Итоговый стек](#84-итоговый-стек)
 - [Список источников](#список-источников)
 
 ## Основная часть
@@ -870,6 +876,83 @@ flowchart TD
 
 ---
 
+
+---
+
+### 8. Технологии
+
+В раздел включены технологии, которые нужны для API, media plane, БД, деплоя и наблюдаемости.
+
+#### 8.1. Языки
+
+| Язык / стандарт | Где используется | Мотивационная часть |
+| --------------- | ---------------- | ------------------- |
+| `C++23` | Backend, control-plane, SFU, recording workers | Основной язык: высокая производительность, строгая типизация, современный стандарт [^47] |
+| `TypeScript` | Web-клиент и админка | Типизированный frontend, удобно работать с WebRTC API [^48] |
+| `SQL` | PostgreSQL / Citus | Транзакционные метаданные, индексы, миграции [^25][^26] |
+| `CQL` | ScyllaDB | Запросы по partition key для чата и участников [^62] |
+| `YAML` | Kubernetes / Helm | Декларативное описание деплоя и конфигурации [^54][^55] |
+
+#### 8.2. Сводная таблица технологий
+
+| Технология | Область применения | Мотивационная часть |
+| ---------- | ------------------ | ------------------- |
+| `C++23` | Основной backend | Низкая latency, контроль памяти, удобен для media/control-plane [^47] |
+| `CMake` | Сборка C++ сервисов | Target-based сборка, удобно делить сервисы и библиотеки [^49] |
+| `Conan 2` | C++ зависимости | Фиксирует версии библиотек, упрощает сборку на разных окружениях [^50] |
+| `Boost.Asio / Boost.Beast` | HTTP / WSS / async networking | Асинхронная сеть в C++ без лишнего runtime [^51] |
+| `gRPC + Protobuf` | Внутренние RPC между сервисами | Строгие контракты, генерация C++ client/server кода [^52] |
+| `OpenSSL` | TLS / mTLS | Шифрование HTTPS/WSS и внутренних соединений [^61] |
+| `WebRTC` | Аудио, видео, screen sharing | Базовый стек real-time media, RTCP feedback и media stats [^40][^41] |
+| `SFU` | Media Plane | Маршрутизация потоков без смешивания видео, поддержка simulcast/SVC [^14][^42] |
+| `NGINX L7` | HTTPS/WSS edge | SSL Termination, L7 routing, балансировка API [^19][^20] |
+| `Kubernetes` | Оркестрация сервисов | Deployment, scaling, Service discovery, self-healing [^54] |
+| `Docker / OCI` | Упаковка сервисов | Один образ для dev/stage/prod, проще CI/CD [^53] |
+| `Helm` | Деплой в Kubernetes | Версионируемые шаблоны для сервисов и конфигов [^55] |
+| `PostgreSQL` | `users`, `meetings`, `recordings` metadata | Транзакции, индексы, strong consistency [^25][^26] |
+| `Citus` | Шардирование PostgreSQL | Распределение таблиц по `meeting_id` / `token_hash` [^29] |
+| `PgBouncer` | Пул соединений PostgreSQL | Меньше постоянных соединений к PostgreSQL [^32] |
+| `Redis Cluster` | `sessions`, `meetings_runtime`, counters | TTL, hot state, быстрый key-value доступ [^22][^31] |
+| `ScyllaDB` | `participants`, `chat_messages`, `user_meetings` | Высокая write-нагрузка, чтение по ключу без JOIN [^33][^34] |
+| `S3-compatible Object Storage` | Записи встреч и чанки | Большие immutable-файлы, multipart upload [^23][^46] |
+| `AWS SDK for C++` | Доступ к object storage | C++ клиент для S3-compatible API [^39] |
+| `Prometheus` | Метрики | Time-series мониторинг и alerting [^56] |
+| `Grafana` | Дашборды | Визуализация метрик, логов и traces [^57] |
+| `OpenTelemetry` | Instrumentation | Единый сбор traces, metrics, logs [^58] |
+| `Loki` | Логи | Централизованное хранение и поиск логов [^59] |
+| `Jaeger` | Distributed tracing | Поиск узких мест между микросервисами [^60] |
+
+#### 8.3. Схема использования технологий
+
+```mermaid
+flowchart TD
+    C["Web client<br/>TypeScript + WebRTC"] --> N["NGINX L7"]
+    N --> API["C++23 API / Control Plane"]
+    API --> PG["PostgreSQL + Citus"]
+    API --> R["Redis Cluster"]
+    API --> SC["ScyllaDB"]
+    C --> SFU["C++23 SFU / WebRTC"]
+    SFU --> S3["S3 Object Storage"]
+    API --> O["OpenTelemetry"]
+    SFU --> O
+    O --> P["Prometheus / Loki / Jaeger"]
+    P --> G["Grafana"]
+```
+
+#### 8.4. Итоговый стек
+
+| Контур | Выбор |
+| ------ | ----- |
+| Основной язык | `C++23` |
+| Frontend | `TypeScript + WebRTC` |
+| API / Control Plane | `C++23 + gRPC + PostgreSQL/Citus + Redis` |
+| Media Plane | `C++23 SFU + WebRTC + simulcast/SVC` |
+| Hot write data | `ScyllaDB` |
+| Записи встреч | `S3-compatible Object Storage + multipart upload` |
+| Edge | `NGINX L7 + Provider L4` |
+| Deploy | `Docker + Kubernetes + Helm` |
+| Observability | `Prometheus + Grafana + OpenTelemetry + Loki + Jaeger` |
+
 ## Список источников
 
 [^1]: [Microsoft Tech Community — Teams Grows to 320 Million Monthly Active Users](https://techcommunity.microsoft.com/discussions/microsoftteams/teams-grows-to-320-million-monthly-active-users/3964746)
@@ -963,3 +1046,37 @@ flowchart TD
 [^45]: [Stripe Docs — Idempotent requests](https://docs.stripe.com/api/idempotent_requests)
 
 [^46]: [Amazon S3 Documentation — Multipart upload overview](https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html)
+
+
+[^47]: [cppreference — Compiler support for C++23](https://en.cppreference.com/w/cpp/compiler_support/23)
+
+[^48]: [TypeScript Documentation — The TypeScript Handbook](https://www.typescriptlang.org/docs/handbook/intro.html)
+
+[^49]: [CMake Documentation — cmake-buildsystem(7)](https://cmake.org/cmake/help/latest/manual/cmake-buildsystem.7.html)
+
+[^50]: [Conan Documentation — Conan 2 C/C++ Package Manager](https://docs.conan.io/)
+
+[^51]: [Boost.Beast Documentation — WebSocket](https://www.boost.org/doc/libs/latest/libs/beast/doc/html/beast/using_websocket.html)
+
+[^52]: [gRPC Documentation — C++](https://grpc.io/docs/languages/cpp/)
+
+[^53]: [Docker Docs — Docker overview](https://docs.docker.com/get-started/docker-overview/)
+
+[^54]: [Kubernetes Documentation — Overview](https://kubernetes.io/docs/concepts/overview/)
+
+[^55]: [Helm Documentation — Docs Home](https://helm.sh/docs/)
+
+[^56]: [Prometheus Documentation — Overview](https://prometheus.io/docs/introduction/overview/)
+
+[^57]: [Grafana Documentation — Grafana OSS and Enterprise](https://grafana.com/docs/grafana/latest/)
+
+[^58]: [OpenTelemetry Documentation](https://opentelemetry.io/docs/)
+
+[^59]: [Grafana Loki OSS — Log aggregation system](https://grafana.com/oss/loki/)
+
+[^60]: [Jaeger Documentation — Introduction](https://www.jaegertracing.io/docs/latest/)
+
+[^61]: [OpenSSL Documentation — openssl command summary](https://docs.openssl.org/3.5/man1/openssl/)
+
+[^62]: [ScyllaDB Documentation — CQL Reference](https://docs.scylladb.com/manual/stable/cql/)
+
