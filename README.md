@@ -29,6 +29,11 @@
     - [4.4. Ограничители для расчёта](#44-ограничители-для-расчёта)
     - [4.5. Расчёт количества L7-балансировщиков](#45-расчёт-количества-l7-балансировщиков)
     - [4.6. Итоговое количество балансировщиков](#46-итоговое-количество-балансировщиков)
+  - [5. Логическая схема БД](#5-логическая-схема-бд)
+    - [5.1. Список логических таблиц](#51-список-логических-таблиц)
+    - [5.2. Размеры данных и QPS](#52-размеры-данных-и-qps)
+    - [5.3. Требования к консистентности](#53-требования-к-консистентности)
+    - [5.4. Распределение нагрузки по ключам](#54-распределение-нагрузки-по-ключам)
 - [Список источников](#список-источников)
 
 ## Основная часть
@@ -461,6 +466,100 @@ N*2 = N_base * 2
 | Пропускная способность сети | Не основной ограничитель для control-plane |
 | Media traffic | Не проходит через NGINX L7 |
 
+
+---
+
+### 5. Логическая схема БД
+
+#### 5.1. Список логических таблиц
+
+Логическая схема не привязана к конкретной СУБД, шардингу и физическим индексам. В схему включены основные таблицы, кеши, runtime-состояние и файловые данные.
+
+##### Логическая схема
+
+![Логическая схема БД](pictures/logic-database.svg)
+
+##### Группы данных
+
+| Группа | Таблицы | Что хранит |
+| ------ | ------- | ---------- |
+| Пользователи | `users`, `user_sessions` | Аккаунты и активные сессии |
+| Встречи | `meetings`, `meeting_participants`, `meeting_invite_links`, `user_meetings` | Создание, вход, роли, список встреч пользователя |
+| Runtime / cache | `meetings_runtime` | Онлайн-состояние активной встречи |
+| Чат | `chat_messages` | Сообщения внутри встречи |
+| Файлы | `recordings`, `recording_upload_buffer` | Метаданные записей и буфер загрузки файлов |
+
+##### Описание таблиц
+
+| Таблица | Тип данных | Назначение | Ключ | Основные связи |
+| ------- | ---------- | ---------- | ---- | -------------- |
+| `users` | persistent | Аккаунт пользователя | `id` | Создаёт встречи, пишет чат, имеет сессии |
+| `user_sessions` | cache / TTL | Авторизованные пользовательские сессии | `session_id` | N:1 к `users` |
+| `meetings` | persistent | Основная карточка встречи | `id` | N:1 к `users`, 1:N к участникам, чату и записям |
+| `meeting_participants` | persistent | Участники встречи и их состояние | `meeting_id + user_id` | N:1 к `meetings`, N:1 к `users` |
+| `meeting_invite_links` | persistent / TTL | Ссылки-приглашения во встречу | `id` | N:1 к `meetings`, N:1 к `users` |
+| `user_meetings` | read model | Список встреч пользователя | `user_id + meeting_id` | N:1 к `users`, N:1 к `meetings` |
+| `meetings_runtime` | cache / runtime | Быстрое состояние активной встречи | `meeting_id` | 1:1 к `meetings` |
+| `chat_messages` | persistent | Сообщения чата встречи | `id` | N:1 к `meetings`, N:1 к `users` |
+| `recordings` | persistent / file metadata | Записи встреч и ссылки на файлы | `id` | N:1 к `meetings` |
+| `recording_upload_buffer` | buffer / TTL | Временные чанки записи до финализации | `chunk_id` | N:1 к `recordings` |
+
+#### 5.2. Размеры данных и QPS
+
+##### Допущения для таблиц
+
+| Допущение | Значение | Основание |
+| --------- | -------: | --------- |
+| Активная сессия | 1 на `DAU` | Упрощённая модель входа |
+| Invite link | 1 на встречу | Для MVP достаточно одной ссылки на встречу |
+| Активные встречи в пик | `MF_PEAK_ONLINE_PARTICIPANTS / 10 = 3 375 000` | Средний размер встречи — 10 участников |
+| TTL-кеши | Удаляются по `expires_at` | TTL-модель поддерживается Redis [^22] |
+| Файлы записи | Видео, аудио и текст чата | Cloud recording у аналога хранит эти типы данных [^7] |
+| Object storage | Файл immutable после финализации | S3 и GCS заявляют strong consistency для объектов [^23][^24] |
+
+##### Таблицы, объём и нагрузка
+
+| Таблица | Строки / окно | Байт / строка | Объём | Read QPS peak | Write QPS peak | Основание |
+| ------- | ------------: | ------------: | ----: | ------------: | -------------: | --------- |
+| `users` | 320 000 000 | 256 B | 81.92 GB | 11 459 | formula | Чтение при `join`, запись = регистрации/профиль |
+| `user_sessions` | 115 000 000 | 128 B | 14.72 GB | 11 459 | 3 993 | 1 активная сессия на DAU |
+| `meetings` | 900 000 000 / 30 дней | 256 B | 230.4 GB | 21 876 | 1 042 | `create`, `join`, `leave`, `recording_metadata` |
+| `meeting_participants` | 9 000 000 000 / 30 дней | 128 B | 1.152 TB | 10 417 | 20 834 | `join + leave` |
+| `meeting_invite_links` | 900 000 000 / 30 дней | 128 B | 115.2 GB | 10 417 | 1 042 | 1 ссылка на встречу |
+| `user_meetings` | 9 000 000 000 / 30 дней | 128 B | 1.152 TB | formula | 20 834 | Быстрый список встреч пользователя |
+| `meetings_runtime` | 3 375 000 peak | 512 B | 1.73 GB | 1 360 417 | 1 370 834 | Heartbeat, online count, status |
+| `chat_messages` | formula | до 10 KB | formula | formula | formula | Частота чата не задана в открытых источниках; лимит сообщения есть [^6] |
+| `recordings` | 900 000 000 / 30 дней | 256 B + file | 230.4 GB metadata + 685.26 PB files | formula | 1 042 | Метаданные + файлы записей |
+| `recording_upload_buffer` | formula / TTL | `chunk_size` | formula | formula | formula | Буфер чанков до сборки итогового файла |
+
+#### 5.3. Требования к консистентности
+
+| Таблица | Консистентность | Почему |
+| ------- | --------------- | ------ |
+| `users` | Strong | Нельзя авторизовать несуществующего пользователя |
+| `user_sessions` | Strong + TTL | Ошибка сессии ломает вход во встречу |
+| `meetings` | Strong в `home_dc` | `join` должен видеть актуальный статус встречи |
+| `meeting_participants` | Strong в `home_dc` | Нельзя дважды добавить одного участника |
+| `meeting_invite_links` | Strong + TTL | Токен должен быть однозначно валиден или отозван |
+| `user_meetings` | Eventual | Список встреч может обновиться с небольшой задержкой |
+| `meetings_runtime` | Eventual / rebuildable | Кеш можно пересобрать из `meetings` и `meeting_participants` |
+| `chat_messages` | Strong append внутри `meeting_id` | Внутри встречи важен порядок сообщений |
+| `recordings` | Strong metadata + immutable file | UI должен видеть корректный статус записи |
+| `recording_upload_buffer` | At-least-once + checksum | Чанк можно перезалить, итоговый файл проверяется |
+
+#### 5.4. Распределение нагрузки по ключам
+
+| Ключ | Где используется | Распределение | Риск hot key | Что делаем логически |
+| ---- | ---------------- | ------------- | ------------ | -------------------- |
+| `user_id` | `users`, `user_sessions`, `user_meetings` | Почти равномерно | Низкий | Храним пользовательские данные отдельно от встреч |
+| `meeting_id` | `meetings`, `participants`, `chat`, `recordings` | Неравномерно | Высокий на больших встречах | Встреча закрепляется за `home_dc` |
+| `meeting_id + user_id` | `meeting_participants`, `user_meetings` | Равномернее, чем один `meeting_id` | Средний | Участники пишутся отдельными строками |
+| `session_id` | `user_sessions` | Равномерно | Низкий | TTL по `expires_at` |
+| `token` | `meeting_invite_links` | Равномерно | Низкий | Уникальный токен + срок жизни |
+| `message_id` | `chat_messages` | Равномерно | Низкий | Порядок задаётся внутри `meeting_id` |
+| `recording_id` | `recordings`, `recording_upload_buffer` | По созданным записям | Средний | Файл после финализации не изменяется |
+| `storage_url` | `recordings` | Может перекоситься по ДЦ/дате | Средний | Путь строится как `home_dc/date/hash(recording_id)` |
+
 ---
 
 ## Список источников
@@ -506,3 +605,10 @@ N*2 = N_base * 2
 [^20]: [NGINX Community Blog — Testing the Performance of NGINX and NGINX Plus Web Servers](https://blog.nginx.org/blog/testing-the-performance-of-nginx-and-nginx-plus-web-servers)
 
 [^21]: [Kubernetes Documentation — Service type LoadBalancer](https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer)
+
+[^22]: [Redis Docs — Key expiration](https://redis.io/docs/latest/develop/using-commands/keyspace/)
+
+[^23]: [Amazon S3 — Strong Consistency](https://aws.amazon.com/s3/consistency/)
+
+[^24]: [Google Cloud Storage — Consistency](https://docs.cloud.google.com/storage/docs/consistency)
+

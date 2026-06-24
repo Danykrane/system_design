@@ -8,13 +8,17 @@
         "type": "tabs",
         "children": [
           {
-            "id": "244306f9c2b67158",
+            "id": "0946108b2dd81082",
             "type": "leaf",
             "state": {
-              "type": "empty",
-              "state": {},
+              "type": "markdown",
+              "state": {
+                "file": "logic-database.md",
+                "mode": "source",
+                "source": false
+              },
               "icon": "lucide-file",
-              "title": "Новая вкладка"
+              "title": "logic-database"
             }
           }
         ]
@@ -179,9 +183,15 @@
       "bases:Создать новую базу": false
     }
   },
-  "active": "244306f9c2b67158",
+  "active": "3ddd8ee0c387f949",
   "lastOpenFiles": [
     "README.md",
+    "meetflow_highload_sections_1_5_simplified.md",
+    "logic-database.md",
+    "resource/Новая папка",
+    "resource",
+    "Новая папка",
+    "meetflow_highload_sections_1_5.md",
     "MeetFlow_part_4_local_balancing_short.md",
     "MeetFlow_part_4_local_balancing.md",
     "meetflow_section_3_global_balancing_fixed.md",
@@ -191,7 +201,6 @@
     "README(7).md",
     "README(6).md",
     "README(4).md",
-    "Без названия.md",
     "README(3).md"
   ]
 }
