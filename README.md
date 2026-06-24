@@ -23,13 +23,12 @@
     - [3.6. Регулировка трафика между дата-центрами](#36-регулировка-трафика-между-дата-центрами)
     - [3.7. Вывод по глобальной балансировке](#37-вывод-по-глобальной-балансировке)
   - [4. Локальная балансировка нагрузки](#4-локальная-балансировка-нагрузки)
-    - [4.1. Что балансируем локально](#41-что-балансируем-локально)
+    - [4.1. Границы локальной балансировки](#41-границы-локальной-балансировки)
     - [4.2. Схема локальной балансировки](#42-схема-локальной-балансировки)
     - [4.3. Механизмы резервирования](#43-механизмы-резервирования)
     - [4.4. Ограничители для расчёта](#44-ограничители-для-расчёта)
-    - [4.5. Расчёт входной нагрузки на L7 Edge](#45-расчёт-входной-нагрузки-на-l7-edge)
-    - [4.6. Расчёт количества L7-балансировщиков](#46-расчёт-количества-l7-балансировщиков)
-    - [4.7. Вывод по локальной балансировке](#47-вывод-по-локальной-балансировке)
+    - [4.5. Расчёт количества L7-балансировщиков](#45-расчёт-количества-l7-балансировщиков)
+    - [4.6. Итоговое количество балансировщиков](#46-итоговое-количество-балансировщиков)
 - [Список источников](#список-источников)
 
 ## Основная часть
@@ -374,146 +373,93 @@ flowchart TD
 
 ### 4. Локальная балансировка нагрузки
 
-Локальная балансировка нужна внутри каждого ДЦ после глобального выбора региона. L4-слой отдаётся провайдеру. В своей инфраструктуре считаем только L7 Edge-балансировщики, которые принимают `HTTPS/WSS`, делают SSL Termination и направляют запросы в сервисы.
+#### 4.1. Границы локальной балансировки
 
-Медиа-трафик (`video/audio/screen sharing`) не пропускается через NGINX Ingress. Он идёт через провайдерский L4 и дальше в `SFU`-пулы, иначе L7-балансировщики станут главным bottleneck.
-
-#### 4.1. Что балансируем локально
-
-| Уровень | Трафик | Компонент | Что делает | Считаем в этом разделе |
-| ------- | ------ | --------- | ---------- | ---------------------- |
-| L4 Provider LB | `TCP 443`, `UDP/TCP media` | Провайдерский Load Balancer | Принимает внешний трафик, делает health-based routing до edge/SFU | Нет |
-| L7 Edge | `HTTPS`, `WSS` | NGINX Ingress / NGINX Edge | SSL Termination, routing, WebSocket proxy | Да |
-| Service LB | Внутренний HTTP/gRPC | Kubernetes Service | Балансирует трафик на pods сервиса | Нет |
-| Media Plane | `RTP/SRTP`, `WebRTC media` | Provider L4 + SFU selector | Sticky-направление участника на SFU | Нет |
-| Recording Upload | HTTPS upload | Upload service + object storage | Принимает запись и кладёт в storage | Нет |
-
-Kubernetes `Service` типа `LoadBalancer` использует внешний load balancer; сам Kubernetes не предоставляет L4-балансировщик без провайдера или внешней интеграции [^22]. Поэтому L4 в расчёте серверов MeetFlow не учитывается.
+| Поток | Где балансируется | В расчёте NGINX L7 |
+| ----- | ----------------- | ----------------- |
+| HTTPS API | Provider L4 → NGINX L7 | Да |
+| WSS / heartbeat | Provider L4 → NGINX L7 | Да |
+| RTP/SRTP media | Provider L4 → SFU pool | Нет |
+| Recording metadata | Provider L4 → NGINX L7 | Да |
+| Recording media upload | Provider L4 → object storage / recording workers | Нет |
 
 #### 4.2. Схема локальной балансировки
 
 ```mermaid
 flowchart TD
-    U["User"] --> GLB["Global DNS / Anycast<br/>из раздела 3"]
-    GLB --> PL4["Provider L4 LB<br/>TCP 443 / UDP media"]
-
-    PL4 --> E1["L7 Edge A<br/>NGINX Ingress"]
-    PL4 --> E2["L7 Edge B<br/>NGINX Ingress"]
-    PL4 --> E3["L7 Edge C<br/>NGINX Ingress / reserve"]
-
-    E1 --> API["API / Meeting Control Plane"]
-    E2 --> API
-    E3 --> API
-
-    E1 --> WS["WS Presence / Heartbeat"]
-    E2 --> WS
-    E3 --> WS
-
-    API --> SVC["Kubernetes Service"]
-    SVC --> P1["Pod 1"]
-    SVC --> P2["Pod 2"]
-    SVC --> P3["Pod N+1"]
-
-    API --> SEL["SFU selector<br/>meeting_id + home_dc"]
-    PL4 --> SFU1["SFU pool AZ-1"]
-    PL4 --> SFU2["SFU pool AZ-2"]
-    PL4 --> SFU3["SFU pool reserve"]
-
-    SEL -. "media endpoint" .-> U
+    U["Client"] --> L4["Provider L4 LB"]
+    L4 --> L7["NGINX L7 pool"]
+    L7 --> API["API / WS / Control Plane"]
+    L4 --> SFU["SFU media pool"]
+    SFU --> REC["Recording workers"]
 ```
 
 #### 4.3. Механизмы резервирования
 
-| Уровень | Формула | Механизм | Что происходит при отказе |
-| ------- | ------- | -------- | ------------------------- |
-| Provider L4 LB | `N * 2` | Active-active в двух зонах провайдера | Провайдер убирает unhealthy backend из ротации |
-| L7 Edge NGINX | `N + 1` | Несколько stateless edge-узлов в разных AZ | Один узел можно потерять без просадки пика |
-| API / Control Plane | `N + 1` | Горизонтальные replicas + readiness/liveness | Kubernetes убирает pod из Service endpoints |
-| WS Presence | `N + 1` | Sticky session по connection-id / user-id | Новое подключение уходит на живой pod |
-| SFU pool | `N + 1` | Новые встречи не выдаются на degraded SFU | Старые встречи доживают, новые идут в другой pool |
-| Recording upload | `N + 1` | Несколько upload workers | Повтор upload по idempotency key |
-
-Для upstream-сервисов NGINX может использовать passive health checks, а NGINX Plus — active health checks [^21]. В проектном расчёте считаем, что внешний L4 и Kubernetes readiness/liveness закрывают базовое исключение unhealthy-узлов.
+| Уровень | Что делает | Резервирование | Формула |
+| ------- | ---------- | -------------- | ------- |
+| Provider L4 LB | TCP/UDP вход в ДЦ | Managed HA у провайдера | Не считаем |
+| NGINX L7 pool | HTTPS/WSS, SSL Termination, routing | Active-active + health checks | `N+1` |
+| NGINX L7 strict HA | Потеря AZ / стойки | Полное дублирование ёмкости | `N*2` |
+| SFU media pool | Видео, аудио, screen sharing | Sticky meeting + health checks | `N+1` |
 
 #### 4.4. Ограничители для расчёта
 
-Для расчёта L7 Edge используем два ограничения: SSL Termination и пропускную способность сети.
+| Ограничитель | Значение | Источник / расчёт |
+| ------------ | -------: | ----------------- |
+| `LB_SSL_TPS` | **58 811 SSL TPS** | NGINX Ingress Controller, 24 CPU, HT enabled [^19] |
+| `LB_NET_GBPS` | **8.8 Gbps** | NGINX Ingress Controller throughput [^19] |
+| `LB_HTTPS_CPS` | **10 274 CPS** | NGINX HTTPS CPS, 24 CPU [^20] |
+| `MF_L7_REQ_SIZE` | **1 KB** | Базовый размер из NGINX Ingress HTTPS/RPS benchmark [^19] |
+| Provider L4 | Внешний `LoadBalancer` | Kubernetes: внешний LB создаётся провайдером, провайдер решает как балансировать [^21] |
 
-| Ограничитель | Бенчмарк | Значение | Как используем |
-| ------------ | -------- | -------: | --------------- |
-| SSL/TLS TPS в Kubernetes Ingress | NGINX Ingress Controller, 24 CPU, HT enabled | **58 811 SSL TPS** | Верхняя оценка для Ingress в Kubernetes [^19] |
-| HTTPS CPS | NGINX web server, 24 CPU | **10 274 CPS** | Консервативный лимит для новых HTTPS-соединений [^20] |
-| Throughput | NGINX Ingress Controller, 16/24 CPU | **8.8 Gbps** | Лимит по сети для L7 Edge [^19] |
-| Целевая утилизация | Проектное допущение | **70%** | Оставляем запас на пики и деградацию |
-
-Для sizing берём **10 274 HTTPS CPS**, потому что это более строгий лимит для worst-case сценария с большим числом новых TLS-соединений. Значение **58 811 SSL TPS** оставляем как проверку, что Kubernetes Ingress в тесте NGINX способен на более высокий TLS TPS при другой методике.
-
-Рабочие лимиты на один L7 Edge-узел:
+#### 4.5. Расчёт количества L7-балансировщиков
 
 ```text
-MF_L7_SSL_CPS_NODE_SAFE = 10 274 * 0.7 = 7 192 CPS
-MF_L7_NET_GBPS_NODE_SAFE = 8.8 * 0.7 = 6.16 Gbps
+MF_L7_PEAK_RPS  = create + join + leave + heartbeat + recording_metadata
+MF_L7_PEAK_CPS  = create + join + leave + recording_metadata
+MF_L7_PEAK_GBPS = MF_L7_PEAK_RPS * 1 KB * 8 / 1_000_000
+
+N_ssl  = ceil(MF_L7_PEAK_RPS / 58 811)
+N_cps  = ceil(MF_L7_PEAK_CPS / 10 274)
+N_net  = ceil(MF_L7_PEAK_GBPS / 8.8)
+N_base = max(N_ssl, N_cps, N_net)
+
+N+1 = N_base + 1
+N*2 = N_base * 2
 ```
 
-#### 4.5. Расчёт входной нагрузки на L7 Edge
+| ДЦ / пул | L7 peak RPS | L7 peak CPS | L7 Gbps |
+| -------- | ----------: | -----------: | ------: |
+| `DC-US-NORTHAMERICA` | **609 850** | 10 180 | 4.88 |
+| `DC-JP-TOKYO` | **68 646** | 1 146 | 0.55 |
+| `DC-IN-MUMBAI` | **59 721** | 996 | 0.48 |
+| `DC-UK-LONDON` | **51 074** | 854 | 0.41 |
+| `OTHER_REGIONAL_POOL` | **583 627** | 9 742 | 4.67 |
+| **Сумма по ДЦ** | **1 372 918** | **22 918** | **10.98** |
 
-В L7 Edge включаем только `control-plane` трафик. Heartbeat идёт по уже открытому `WSS`, поэтому он создаёт сетевую нагрузку, но не создаёт новый TLS handshake на каждый heartbeat.
+| ДЦ / пул | `N_ssl` | `N_cps` | `N_net` | `N+1` | `N*2` |
+| -------- | ------: | ------: | ------: | ----: | ----: |
+| `DC-US-NORTHAMERICA` | 11 | 1 | 1 | **12** | 22 |
+| `DC-JP-TOKYO` | 2 | 1 | 1 | **3** | 4 |
+| `DC-IN-MUMBAI` | 2 | 1 | 1 | **3** | 4 |
+| `DC-UK-LONDON` | 1 | 1 | 1 | **2** | 2 |
+| `OTHER_REGIONAL_POOL` | 10 | 1 | 1 | **11** | 20 |
+| **Сумма по ДЦ** | **26** | **5** | **5** | **31** | **52** |
 
-| Метрика | Расчёт | Значение |
-| ------- | ------ | -------: |
-| `MF_TLS_PEAK_CPS` | `POST /meetings + join + leave + recordings/metadata` | **22 918 CPS** |
-| `MF_HEARTBEAT_PEAK_RPS` | из раздела 2.4 | **1 350 000 events/s** |
-| `MF_CONTROL_EVENT_SIZE_KB` | проектная верхняя оценка | **4 KB** |
-| `MF_HEARTBEAT_EVENT_SIZE_KB` | проектная верхняя оценка | **1 KB** |
-| `MF_L7_BW_PEAK_GBPS` | `(22 918 * 4 KB * 8 + 1 350 000 * 1 KB * 8) / 1 000 000` | **11.53 Gbps** |
+#### 4.6. Итоговое количество балансировщиков
 
-Медиа-трафик из раздела 3.3 через L7 Edge не идёт.
+| Режим | Количество NGINX L7 | Что закладываем |
+| ----- | ------------------: | --------------- |
+| Рабочий вариант | **31** | `N+1` по каждому ДЦ/пулу |
+| Жёсткое резервирование | **52** | `N*2` по каждому ДЦ/пулу |
+| Provider L4 | Не считаем | Отдаётся на сторону провайдера |
 
-| Трафик | Пиковое значение | Где балансируется |
-| ------ | ---------------: | ----------------- |
-| Control-plane `HTTPS/WSS` | **11.53 Gbps** | L7 Edge NGINX |
-| Media-plane `video/audio/screen` | **156 262.5 Gbps** | Provider L4 + SFU |
-
-Контрольная проверка:
-
-```text
-N_wrong_media = ceil(156 262.5 / 6.16) = 25 367 L7-балансировщиков
-```
-
-Такой результат означает, что пропускать WebRTC media через NGINX Ingress архитектурно нельзя.
-
-#### 4.6. Расчёт количества L7-балансировщиков
-
-Формулы:
-
-```text
-N_ssl = ceil(dc_tls_cps / MF_L7_SSL_CPS_NODE_SAFE)
-N_net = ceil(dc_l7_bw_gbps / MF_L7_NET_GBPS_NODE_SAFE)
-N_base = max(N_ssl, N_net, 1)
-N_final = N_base + 1
-```
-
-| ДЦ / пул | Peak TLS CPS | Peak L7 BW | `N_ssl` | `N_net` | `N_base` | Резерв | Итого L7 Edge |
-| -------- | -----------: | ---------: | ------: | ------: | -------: | ------ | -------------: |
-| `DC-US-NORTHAMERICA` | **10 180** | **5.12 Gbps** | 2 | 1 | 2 | `N + 1` | **3** |
-| `DC-JP-TOKYO` | **1 146** | **0.58 Gbps** | 1 | 1 | 1 | `N + 1` | **2** |
-| `DC-IN-MUMBAI` | **997** | **0.50 Gbps** | 1 | 1 | 1 | `N + 1` | **2** |
-| `DC-UK-LONDON` | **853** | **0.43 Gbps** | 1 | 1 | 1 | `N + 1` | **2** |
-| `OTHER_REGIONAL_POOL` | **9 742** | **4.90 Gbps** | 2 | 1 | 2 | `N + 1` | **3** |
-| **Итого** | **22 918** | **11.53 Gbps** | — | — | — | — | **12 L7 Edge** |
-
-#### 4.7. Вывод по локальной балансировке
-
-| Решение | Итог |
-| ------- | ---- |
-| L4 | Отдаётся провайдеру, резервирование `N * 2` |
-| L7 | NGINX Ingress / NGINX Edge, резервирование `N + 1` |
-| Минимум L7 Edge | **12 балансировщиков на все ДЦ/пулы** |
-| Главный ограничитель | SSL Termination в `DC-US-NORTHAMERICA` и `OTHER_REGIONAL_POOL` |
-| Network bottleneck | Не является главным, если media-plane не идёт через L7 |
-| Media-plane | Балансируется отдельно через Provider L4 + SFU selector |
-
-Итоговая схема подходит для текущего расчёта: `control-plane` выдерживается 12 L7 Edge-узлами, а тяжёлый media-plane не ломает L7-слой, потому что уходит напрямую в SFU-пулы через провайдерский L4.
+| Что ограничивает расчёт | Итог |
+| ----------------------- | ---- |
+| SSL Termination | Основной ограничитель |
+| Пропускная способность сети | Не основной ограничитель для control-plane |
+| Media traffic | Не проходит через NGINX L7 |
 
 ---
 
@@ -559,6 +505,4 @@ N_final = N_base + 1
 
 [^20]: [NGINX Community Blog — Testing the Performance of NGINX and NGINX Plus Web Servers](https://blog.nginx.org/blog/testing-the-performance-of-nginx-and-nginx-plus-web-servers)
 
-[^21]: [NGINX Documentation — HTTP Health Checks](https://docs.nginx.com/nginx/admin-guide/load-balancer/http-health-check/)
-
-[^22]: [Kubernetes Documentation — Service](https://kubernetes.io/docs/concepts/services-networking/service/)
+[^21]: [Kubernetes Documentation — Service type LoadBalancer](https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer)
