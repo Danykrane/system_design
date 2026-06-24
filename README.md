@@ -487,7 +487,7 @@ N*2 = N_base * 2
 Логическая схема не привязана к конкретной СУБД, шардингу и физическим индексам. В схему включены только основные сущности сервиса и связи между ними.
 
 ##### Логическая схема
-Для получения картинки использовался сервис [dbdiagram](https://dbdiagram.io/) с кодом из [этого файла](logic-database-sql.md) ([интерактивная ссылка на работу](https://dbdiagram.io/d/logic-database-6a3bcd543b9b0de59965ea98)).
+Для получения картинки использовался сервис [dbdiagram](https://dbdiagram.io/) с кодом из [этого файла](resource/logic-database-sql.md) ([интерактивная ссылка на работу](https://dbdiagram.io/d/logic-database-6a3bcd543b9b0de59965ea98)).
 
 ![Логическая схема БД](resource/icons/images/logic-database.svg)
 
@@ -572,7 +572,7 @@ N*2 = N_base * 2
 
 #### 6.1. Физическая схема БД
 
-Для получения картинки использовался сервис [dbdiagram](https://dbdiagram.io/) с кодом из [этого файла](physical-database-sql) ([интерактивная ссылка на работу](https://dbdiagram.io/d/physical-database-6a3beef2d0074fe75d15ee2c)).
+Для получения картинки использовался сервис [dbdiagram](https://dbdiagram.io/) с кодом из [этого файла](resource/physical-database-sql) ([интерактивная ссылка на работу](https://dbdiagram.io/d/physical-database-6a3beef2d0074fe75d15ee2c)).
 ![Физическая схема БД](resource/icons/images/physical-database.svg)
 
 #### 6.2. Где хранятся данные
