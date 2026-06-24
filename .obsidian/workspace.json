@@ -78,7 +78,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 300
+    "width": 200
   },
   "right": {
     "id": "d79f196d26abc771",
@@ -183,10 +183,11 @@
       "bases:Создать новую базу": false
     }
   },
-  "active": "244306f9c2b67158",
+  "active": "3ddd8ee0c387f949",
   "lastOpenFiles": [
-    "README_итог.md",
     "README.md",
+    "meetflow_section_3_global_balancing.md",
+    "README_итог.md",
     "README 1.md",
     "README(7).md",
     "README(6).md",
