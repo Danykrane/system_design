@@ -572,7 +572,7 @@ N*2 = N_base * 2
 
 #### 6.1. Физическая схема БД
 
-Для получения картинки использовался сервис [dbdiagram](https://dbdiagram.io/) с кодом из [этого файла](resource/physical-database-sql.md) ([интерактивная ссылка на работу](https://dbdiagram.io/d/physical-database-6a3beef2d0074fe75d15ee2c)).
+Для получения картинки использовался сервис [dbdiagram](https://dbdiagram.io/) с кодом из [этого файла](resource/physical-database-sql.md) ([интерактивная ссылка на работу](https://dbdiagram.io/d/6a3beef2d0074fe75d15ee2c)).
 ![Физическая схема БД](resource/icons/images/physical-database.svg)
 
 #### 6.2. Где хранятся данные
