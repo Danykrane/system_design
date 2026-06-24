@@ -34,6 +34,19 @@
     - [5.2. Размеры данных и QPS](#52-размеры-данных-и-qps)
     - [5.3. Требования к консистентности](#53-требования-к-консистентности)
     - [5.4. Распределение нагрузки по ключам](#54-распределение-нагрузки-по-ключам)
+  - [6. Физическая схема БД](#6-физическая-схема-бд)
+    - [6.1. Физическая схема](#61-физическая-схема)
+    - [6.2. Где хранятся данные](#62-где-хранятся-данные)
+    - [6.3. Выбор СУБД по таблицам](#63-выбор-субд-по-таблицам)
+    - [6.4. Индексы](#64-индексы)
+    - [6.5. Шардирование](#65-шардирование)
+    - [6.6. Нагрузка на строки](#66-нагрузка-на-строки)
+    - [6.7. API → запрос → БД](#67-api--запрос--бд)
+    - [6.8. Кеш](#68-кеш)
+    - [6.9. Денормализация и отказ от JOIN](#69-денормализация-и-отказ-от-join)
+    - [6.10. Клиентские библиотеки](#610-клиентские-библиотеки)
+    - [6.11. Балансировка запросов](#611-балансировка-запросов)
+    - [6.12. Резервирование и бэкапы](#612-резервирование-и-бэкапы)
 - [Список источников](#список-источников)
 
 ## Основная часть
@@ -476,19 +489,19 @@ N*2 = N_base * 2
 Логическая схема не привязана к конкретной СУБД, шардингу и физическим индексам. В схему включены основные таблицы, кеши, runtime-состояние и файловые данные.
 
 ##### Логическая схема
-Для получения картинки использовался сервис [dbdiagram](https://dbdiagram.io/) с кодом из [этого файла](resource/database-sql.md) ([интерактивная ссылка на работу](https://dbdiagram.io/d/logic-database-6a3bcd543b9b0de59965ea98)).
+Для получения картинки использовался сервис [dbdiagram](https://dbdiagram.io/) с кодом из [этого файла](logic-database-sql.md) ([интерактивная ссылка на работу](https://dbdiagram.io/d/logic-database-6a3bcd543b9b0de59965ea98)).
 
 ![Логическая схема БД](resource/icons/images/logic-database.svg)
 
 ##### Группы данных
 
-| Группа | Таблицы | Что хранит |
-| ------ | ------- | ---------- |
-| Пользователи | `users`, `user_sessions` | Аккаунты и активные сессии |
-| Встречи | `meetings`, `meeting_participants`, `meeting_invite_links`, `user_meetings` | Создание, вход, роли, список встреч пользователя |
-| Runtime / cache | `meetings_runtime` | Онлайн-состояние активной встречи |
-| Чат | `chat_messages` | Сообщения внутри встречи |
-| Файлы | `recordings`, `recording_upload_buffer` | Метаданные записей и буфер загрузки файлов |
+| Группа          | Таблицы                                                                     | Что хранит                                       |
+| --------------- | --------------------------------------------------------------------------- | ------------------------------------------------ |
+| Пользователи    | `users`, `user_sessions`                                                    | Аккаунты и активные сессии                       |
+| Встречи         | `meetings`, `meeting_participants`, `meeting_invite_links`, `user_meetings` | Создание, вход, роли, список встреч пользователя |
+| Runtime / cache | `meetings_runtime`                                                          | Онлайн-состояние активной встречи                |
+| Чат             | `chat_messages`                                                             | Сообщения внутри встречи                         |
+| Файлы           | `recordings`, `recording_upload_buffer`                                     | Метаданные записей и буфер загрузки файлов       |
 
 ##### Описание таблиц
 
@@ -563,6 +576,224 @@ N*2 = N_base * 2
 
 ---
 
+### 6. Физическая схема БД
+
+#### 6.1. Физическая схема БД
+
+Для получения картинки использовался сервис [dbdiagram](https://dbdiagram.io/) с кодом из [этого файла](physical-database-sql) ([интерактивная ссылка на работу](https://dbdiagram.io/d/physical-database-6a3beef2d0074fe75d15ee2c)).
+![Физическая схема БД](resource/icons/images/physical-database.svg)
+
+#### 6.2. Где хранятся данные
+
+| Таблица | Где хранится | Что хранится физически | Главный ключ доступа |
+| ------- | ------------ | ---------------------- | -------------------- |
+| `users` | PostgreSQL, `auth_pg` | Аккаунты пользователей | `id`, `email` |
+| `user_sessions` | Redis Cluster, `session_redis` | Активные сессии с TTL | `session_id` |
+| `meetings` | PostgreSQL + Citus, `meeting_pg` | Метаданные встреч | `id = meeting_id` |
+| `meeting_participants` | ScyllaDB, `meeting_scylla` | Участники и состояние входа | `meeting_id + bucket + user_id` |
+| `meeting_invite_links` | PostgreSQL + Citus, `meeting_pg` | Токены приглашений | `token_hash`, `token` |
+| `user_meetings` | ScyllaDB, `meeting_scylla` | Список последних встреч пользователя | `user_id + scheduled_start` |
+| `meetings_runtime` | Redis Cluster, `runtime_redis` | Онлайн-состояние встречи | `meeting_id` |
+| `chat_messages` | ScyllaDB, `chat_scylla` | Append-only лог сообщений | `meeting_id + bucket + message_seq` |
+| `recordings` | PostgreSQL + Citus, `recording_pg` | Метаданные записей | `meeting_id`, `id` |
+| `recording_upload_buffer` | S3-compatible Object Storage + Redis TTL | Временные чанки записи | `recording_id + chunk_number` |
+
+#### 6.3. Выбор СУБД по таблицам
+
+| Таблица | СУБД | Почему так |
+| ------- | ---- | ---------- |
+| `users` | PostgreSQL | Нужны транзакции, уникальный `email`, индексы |
+| `user_sessions` | Redis Cluster | TTL и быстрый lookup сессии |
+| `meetings` | PostgreSQL + Citus | SQL-метаданные + шардирование по `meeting_id` |
+| `meeting_participants` | ScyllaDB | Много записей `join/leave`, JOIN не нужен |
+| `meeting_invite_links` | PostgreSQL + Citus | Точечный lookup по токену и TTL-индекс |
+| `user_meetings` | ScyllaDB | Top-100 встреч пользователя без JOIN |
+| `meetings_runtime` | Redis Cluster | `1 350 000` heartbeat RPS в пике |
+| `chat_messages` | ScyllaDB | Append-only лог, чтение диапазона по `message_seq` |
+| `recordings` | PostgreSQL + Citus | Статусы и метаданные записей |
+| `recording_upload_buffer` | S3-compatible Object Storage | Чанки и большие файлы не хранятся в SQL |
+
+#### 6.4. Индексы
+
+| Таблица | Индекс | Для какого запроса |
+| ------- | ------ | ------------------ |
+| `users` | `PK(id)` | Получение пользователя по `user_id` |
+| `users` | `UNIQUE(email)` | Логин и проверка дубля |
+| `users` | `INDEX(created_at)` | Админские выборки по дате |
+| `user_sessions` | `KEY session:{session_id}` | Проверка сессии |
+| `user_sessions` | `TTL(expires_at)` | Автоудаление сессий |
+| `meetings` | `PK(id)` | `join`, `leave`, `recording_metadata` |
+| `meetings` | `INDEX(owner_id, scheduled_start)` | Список встреч владельца |
+| `meetings` | `INDEX(home_dc, status)` | Выбор активных встреч в ДЦ |
+| `meeting_participants` | `PK(meeting_id, bucket, user_id)` | Вход/выход участника |
+| `meeting_participants` | `INDEX(user_id, last_joined_at)` | История участника |
+| `meeting_invite_links` | `UNIQUE(token)` | Вход по ссылке |
+| `meeting_invite_links` | `INDEX(token_hash)` | Выбор шарда по токену |
+| `meeting_invite_links` | `INDEX(expires_at)` | Удаление истёкших ссылок |
+| `user_meetings` | `PK(user_id, scheduled_start, meeting_id)` | Top-100 встреч пользователя |
+| `meetings_runtime` | `KEY runtime:{meeting_id}` | Heartbeat и счётчики |
+| `chat_messages` | `PK(meeting_id, bucket, message_seq)` | Чтение сообщений по порядку |
+| `chat_messages` | `UNIQUE(id)` | Идемпотентная запись сообщения |
+| `recordings` | `PK(id)` | Карточка записи |
+| `recordings` | `INDEX(meeting_id, created_at)` | Список записей встречи |
+| `recordings` | `INDEX(status, created_at)` | Очередь обработки |
+| `recording_upload_buffer` | `UNIQUE(recording_id, chunk_number)` | Идемпотентная загрузка чанка |
+| `recording_upload_buffer` | `TTL(expires_at)` | Удаление временных чанков |
+
+Индекс в шардированной таблице работает внутри шарда. Поэтому запрос должен сначала попадать в правильный шард по `meeting_id`, `user_id` или `token_hash`.
+
+#### 6.5. Шардирование
+
+| Таблица | Что шардируем | Ключ шардинга | Почему |
+| ------- | ------------- | ------------- | ------ |
+| `users` | Не шардируем на MVP | `id` как partition key | `81.92 GB`, запись низкая |
+| `user_sessions` | Да | `session_id` | `115 млн` активных сессий |
+| `meetings` | Да | `meeting_id` | `900 млн` строк за 30 дней |
+| `meeting_participants` | Да | `meeting_id + bucket` | `9 млрд` строк за 30 дней |
+| `meeting_invite_links` | Да | `token_hash` | `join` начинается с токена |
+| `user_meetings` | Да | `user_id` | Пользователь читает свой сплошной список |
+| `meetings_runtime` | Да | `meeting_id` | `1.35 млн` heartbeat RPS |
+| `chat_messages` | Да | `meeting_id + bucket` | Чат читается по встрече и диапазону `seq` |
+| `recordings` | Да | `meeting_id` | Записи читаются по встрече |
+| `recording_upload_buffer` | Да | `recording_id` | Чанки собираются в одну запись |
+
+| Правило | Как применено |
+| ------- | ------------- |
+| Репликация масштабирует чтение | Для чтения можно использовать read-replica |
+| Репликация не масштабирует запись | Запись масштабируется шардингом |
+| JOIN на больших RPS не делаем | Hot-path разбит на point queries |
+| Таблицы в разных СУБД не JOIN-ятся | Связи логические, не физические FK |
+| Top-100 списка пользователя | Шард по `user_id`, чтение без fan-out |
+| Чат встречи | `message_seq integer`, чтение от `last_seen_seq` до `head_seq` |
+
+#### 6.6. Нагрузка на строки
+
+| API / событие | Peak RPS | Что трогаем | Строк / ключей на запрос | Lines per second |
+| ------------- | -------: | ----------- | ------------------------: | ---------------: |
+| `POST /meetings` | **1 042** | `meetings`, `meeting_invite_links`, `user_meetings`, `meetings_runtime` | 4 | **4 168** |
+| `POST /meetings/{id}/join` | **10 417** | `user_sessions`, `meeting_invite_links`, `meetings`, `meeting_participants`, `user_meetings`, `meetings_runtime` | 6 | **62 502** |
+| `POST /meetings/{id}/leave` | **10 417** | `meeting_participants`, `user_meetings`, `meetings_runtime` | 3 | **31 251** |
+| `WS /presence/heartbeat` | **1 350 000** | `user_sessions`, `meetings_runtime` | 2 | **2 700 000** |
+| `POST /meeting-chat/messages` | **52 083** | `chat_seq:{meeting_id}`, `chat_messages` | 2 | **104 166** |
+| `GET /users/{id}/meetings?limit=100` | **11 979** | `user_meetings` | 100 | **1 197 900** |
+| `POST /recordings/metadata` | **1 042** | `recordings`, `meetings` | 2 | **2 084** |
+
+Допущение для чата: `5` сообщений на одно участие во встрече. Тогда `300 млн * 5 = 1.5 млрд` сообщений/сутки, peak RPS = `52 083`.
+
+#### 6.7. API → запрос → БД
+
+| API | Запрос к БД | Где выполняется | Индекс |
+| --- | ----------- | --------------- | ------ |
+| `POST /meetings` | `INSERT INTO meetings ...` | PostgreSQL + Citus | `PK(id)` |
+| `POST /meetings` | `INSERT INTO meeting_invite_links ...` | PostgreSQL + Citus | `UNIQUE(token)` |
+| `POST /meetings` | `HSET runtime:{meeting_id} ...` | Redis Cluster | `meeting_id` |
+| `POST /meetings/{id}/join` | `GET session:{session_id}` | Redis Cluster | `session_id` |
+| `POST /meetings/{id}/join` | `SELECT meeting_id FROM meeting_invite_links WHERE token = ?` | PostgreSQL + Citus | `UNIQUE(token)` |
+| `POST /meetings/{id}/join` | `SELECT id, status, home_dc FROM meetings WHERE id = ?` | PostgreSQL + Citus | `PK(id)` |
+| `POST /meetings/{id}/join` | `INSERT INTO meeting_participants ...` | ScyllaDB | `meeting_id, bucket, user_id` |
+| `POST /meetings/{id}/join` | `INSERT INTO user_meetings ...` | ScyllaDB | `user_id, scheduled_start` |
+| `POST /meetings/{id}/leave` | `UPDATE meeting_participants SET ...` | ScyllaDB | `meeting_id, bucket, user_id` |
+| `WS /presence/heartbeat` | `HSET runtime:{meeting_id} updated_at ...` | Redis Cluster | `meeting_id` |
+| `POST /meeting-chat/messages` | `INCR chat_seq:{meeting_id}` | Redis Cluster | `meeting_id` |
+| `POST /meeting-chat/messages` | `INSERT INTO chat_messages ...` | ScyllaDB | `meeting_id, bucket, message_seq` |
+| `GET /meeting-chat/messages?after_seq=N` | `SELECT ... WHERE meeting_id=? AND bucket=? AND message_seq>? LIMIT 100` | ScyllaDB | `meeting_id, bucket, message_seq` |
+| `GET /users/{id}/meetings?limit=100` | `SELECT ... WHERE user_id=? LIMIT 100` | ScyllaDB | `user_id, scheduled_start` |
+| `POST /recordings/metadata` | `INSERT INTO recordings ...` | PostgreSQL + Citus | `meeting_id, created_at` |
+| `PUT /recordings/{id}/chunks/{n}` | `PUT object storage_key` | S3-compatible storage | `recording_id, chunk_number` |
+
+#### 6.8. Кеш
+
+| Кеш | Raw size | Peak ops | Cache heat | Решение |
+| --- | -------: | -------: | ---------- | ------- |
+| `meetings_runtime` | **1.73 GB** | **1 370 834 ops/s** | Очень высокий | Обязательно Redis |
+| `user_sessions` | **14.72 GB** | **11 459 ops/s** | Высокий | Обязательно Redis |
+| `active_invite_tokens` | **3.84 GB** | **10 417 ops/s** | Высокий только на join | Можно Redis + PostgreSQL как source of truth |
+| `user_meetings_top100` | **1.472 TB** для всех DAU | **1 197 900 rows/s** | Большой объём | Не кешировать полностью, хранить read model в ScyllaDB |
+| `chat_last100` | **337.5 GB** raw | зависит от активных встреч | Средний | In-memory room buffer, не общий Redis |
+
+| Формула | Значение |
+| ------- | -------- |
+| `meetings_runtime` | `3 375 000 active meetings * 512 B = 1.73 GB` |
+| `active_invite_tokens` | `30 000 000 meetings/day * 128 B = 3.84 GB` |
+| `user_meetings_top100` | `115 000 000 DAU * 100 * 128 B = 1.472 TB` |
+| `chat_last100` | `3 375 000 active meetings * 100 * 1 KB = 337.5 GB` |
+
+#### 6.9. Денормализация и отказ от JOIN
+
+| Денормализация | Где хранится | Зачем |
+| -------------- | ------------ | ----- |
+| `topic`, `scheduled_start`, `status`, `role` в `user_meetings` | ScyllaDB | Список встреч пользователя без JOIN с `meetings` |
+| `participants_online_count` в `meetings_runtime` | Redis | Не считать `COUNT(*)` по участникам |
+| `home_dc` в `meetings` | PostgreSQL + Citus | Быстро направлять meeting traffic |
+| `storage_bucket`, `storage_key` в `recordings` | PostgreSQL + Citus | UI получает ссылку без обхода object storage |
+| `message_seq` в `chat_messages` | ScyllaDB | Клиент читает лог от `last_seen_seq` до `head_seq` |
+
+| Вопрос комиссии | Ответ в схеме |
+| --------------- | ------------- |
+| Как получить Top-100 актуальных встреч пользователя? | `SELECT ... FROM user_meetings WHERE user_id=? LIMIT 100` |
+| По чему шардировать список пользователя? | По `user_id` |
+| По чему шардировать события встречи? | По `meeting_id` |
+| Как совместить оба доступа? | Писать две проекции: `meetings` по `meeting_id`, `user_meetings` по `user_id` |
+| Где JOIN? | В hot-path JOIN нет |
+
+#### 6.10. Клиентские библиотеки
+
+| Хранилище | C++-клиент | Есть ли для C++ | Источник |
+| --------- | ---------- | --------------- | -------- |
+| PostgreSQL | `libpqxx`, `libpq` | Да | `libpqxx` — C++ API, `libpq` — C API PostgreSQL [^35][^36] |
+| PostgreSQL + Citus | `libpqxx` через PostgreSQL protocol | Да | Citus работает как расширение PostgreSQL [^29] |
+| Redis Cluster | `hiredis`, `redis-plus-plus` | Да | `hiredis` — официальный C-клиент, `redis-plus-plus` — C++ wrapper [^37][^38] |
+| ScyllaDB | ScyllaDB C/C++ Driver / Cassandra CQL driver | Да | ScyllaDB поддерживает CQL-драйверы [^34] |
+| S3-compatible storage | AWS SDK for C++ | Да | Есть официальный AWS SDK for C++ [^39] |
+| PgBouncer | PostgreSQL protocol | Да | Для приложения это обычный PostgreSQL endpoint [^32] |
+
+#### 6.11. Балансировка запросов
+
+| Слой | Что делает | Где применяется |
+| ---- | ---------- | --------------- |
+| PgBouncer | Мультиплексирует PostgreSQL connections | `users`, `meetings`, `invite_links`, `recordings` |
+| Transaction pooling | Освобождает server connection после транзакции | Короткие API-запросы |
+| Read/write split | Запись в primary, чтение с replicas | `users`, `meetings`, `recordings` |
+| Citus coordinator | Маршрутизирует запрос в shard по distribution column | `meetings`, `invite_links`, `recordings` |
+| Redis Cluster | Делит ключи по hash slots | `sessions`, `runtime`, `chat_seq` |
+| ScyllaDB driver | Маршрутизирует CQL-запрос к нужным нодам | `participants`, `user_meetings`, `chat_messages` |
+
+#### 6.12. Резервирование и бэкапы
+
+| Хранилище | Резервирование | Бэкап | Комментарий |
+| --------- | -------------- | ----- | ----------- |
+| PostgreSQL `users` | `primary + 2 standby` | Full backup daily + WAL archive | Standby масштабирует чтение |
+| PostgreSQL + Citus | Shards + replicas | Snapshot shards + WAL | Запись масштабируется шардами |
+| Redis Cluster | Primary + replica per shard | RDB/AOF для sessions/runtime не критичен | Runtime можно пересобрать |
+| ScyllaDB | RF=3, CL=QUORUM для важных записей | Snapshot per node | Репликация задаётся RF |
+| S3-compatible storage | Erasure coding + cross-region copy | Versioning + lifecycle | Основной объём — записи встреч |
+| `recording_upload_buffer` | TTL + повторная загрузка чанков | Не бэкапим долгосрочно | Временный буфер |
+
+| Тип данных | RPO | RTO | Почему |
+| ---------- | --- | --- | ------ |
+| `users` | ≤ 5 минут | ≤ 30 минут | Критичные аккаунты |
+| `meetings` | ≤ 5 минут | ≤ 30 минут | Критичные метаданные |
+| `meeting_participants` | ≤ 15 минут | ≤ 30 минут | Можно частично восстановить из событий |
+| `meetings_runtime` | Потеря допустима | ≤ 5 минут | Кеш пересобирается |
+| `chat_messages` | ≤ 5 минут | ≤ 30 минут | Пользовательские данные |
+| `recordings` metadata | ≤ 5 минут | ≤ 30 минут | Нужны статусы записи |
+| Recording files | ≤ 24 часа | часы | Большой объектный объём |
+
+#### 6.13. Итог по физической БД
+
+| Решение | Итог |
+| ------- | ---- |
+| Основная SQL-БД | PostgreSQL + Citus для метаданных |
+| Высоконагруженные состояния | Redis Cluster |
+| Большие append/read-model таблицы | ScyllaDB |
+| Большие файлы | S3-compatible Object Storage |
+| Главная нагрузка для шардинга | `heartbeat`, `participants`, `chat_messages`, `user_meetings` |
+| Главный запрет | Нет JOIN на hot-path |
+| Главный индексный принцип | Каждый API-запрос идёт по конкретному ключу |
+| Главный принцип репликации | Реплики помогают чтению, запись масштабируется шардингом |
+
+---
+
 ## Список источников
 
 [^1]: [Microsoft Tech Community — Teams Grows to 320 Million Monthly Active Users](https://techcommunity.microsoft.com/discussions/microsoftteams/teams-grows-to-320-million-monthly-active-users/3964746)
@@ -613,3 +844,32 @@ N*2 = N_base * 2
 
 [^24]: [Google Cloud Storage — Consistency](https://docs.cloud.google.com/storage/docs/consistency)
 
+[^25]: [PostgreSQL Documentation — Multicolumn Indexes](https://www.postgresql.org/docs/current/indexes-multicolumn.html)
+
+[^26]: [PostgreSQL Documentation — Declarative Partitioning](https://www.postgresql.org/docs/current/ddl-partitioning.html)
+
+[^27]: [PostgreSQL Documentation — Replication](https://www.postgresql.org/docs/current/runtime-config-replication.html)
+
+[^28]: [PostgreSQL Documentation — Continuous Archiving and Point-in-Time Recovery](https://www.postgresql.org/docs/current/continuous-archiving.html)
+
+[^29]: [Citus Documentation — Choosing Distribution Column](https://docs.citusdata.com/en/stable/sharding/data_modeling.html)
+
+[^30]: [Citus Documentation — Distributed Tables and Colocation](https://github.com/citusdata/citus)
+
+[^31]: [Redis Documentation — Redis Cluster Specification](https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/)
+
+[^32]: [PgBouncer Documentation — Features](https://www.pgbouncer.org/features.html)
+
+[^33]: [ScyllaDB Documentation — Fault Tolerance](https://docs.scylladb.com/manual/stable/architecture/architecture-fault-tolerance.html)
+
+[^34]: [ScyllaDB Documentation — C/C++ Driver](https://cpp-driver.docs.scylladb.com/master/)
+
+[^35]: [PostgreSQL Documentation — libpq C Library](https://www.postgresql.org/docs/current/libpq.html)
+
+[^36]: [libpqxx — C++ connector for PostgreSQL](https://pqxx.org/libpqxx/)
+
+[^37]: [Redis Documentation — hiredis guide](https://redis.io/docs/latest/develop/clients/hiredis/)
+
+[^38]: [redis-plus-plus — C++ Redis client](https://github.com/sewenew/redis-plus-plus)
+
+[^39]: [AWS Documentation — AWS SDK for C++](https://docs.aws.amazon.com/sdk-for-cpp/v1/developer-guide/welcome.html)
