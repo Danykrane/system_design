@@ -31,22 +31,22 @@
         <mxCell id="t-YS1E50rEHye12wR0vu-10" value="Anycast IP&lt;br&gt;только NS-серверы DNS" style="rounded=1;whiteSpace=wrap;html=1;arcSize=14;fillColor=#DDEED7;strokeColor=#7DA36B;strokeWidth=1.5;fontColor=#333333;fontSize=12;" vertex="1" parent="1">
           <mxGeometry x="520" y="370" width="200" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="t-YS1E50rEHye12wR0vu-11" value="L4-балансировщик&lt;br&gt;управляемый/HA/на каждый ДЦ" style="rounded=1;whiteSpace=wrap;html=1;arcSize=14;fillColor=#DDEED7;strokeColor=#7DA36B;strokeWidth=1.5;fontColor=#333333;fontSize=12;" vertex="1" parent="1">
+        <mxCell id="t-YS1E50rEHye12wR0vu-11" value="L4: IPVS + keepalived&lt;br&gt;Direct Routing, 2 на ДЦ" style="rounded=1;whiteSpace=wrap;html=1;arcSize=14;fillColor=#DDEED7;strokeColor=#7DA36B;strokeWidth=1.5;fontColor=#333333;fontSize=12;" vertex="1" parent="1">
           <mxGeometry x="520" y="530" width="200" height="58" as="geometry" />
         </mxCell>
-        <mxCell id="t-YS1E50rEHye12wR0vu-12" value="DC-US-EAST&lt;br&gt;37.27%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#BDBDBD;strokeWidth=1;fontColor=#333333;fontSize=10;" vertex="1" parent="1">
+        <mxCell id="t-YS1E50rEHye12wR0vu-12" value="DC-US-EAST&lt;br&gt;28.84%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#BDBDBD;strokeWidth=1;fontColor=#333333;fontSize=10;" vertex="1" parent="1">
           <mxGeometry x="788" y="130" width="113" height="40" as="geometry" />
         </mxCell>
-        <mxCell id="t-YS1E50rEHye12wR0vu-13" value="DC-US-WEST&lt;br&gt;9.65%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#BDBDBD;strokeWidth=1;fontColor=#333333;fontSize=10;" vertex="1" parent="1">
+        <mxCell id="t-YS1E50rEHye12wR0vu-13" value="DC-US-WEST&lt;br&gt;7.40%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#BDBDBD;strokeWidth=1;fontColor=#333333;fontSize=10;" vertex="1" parent="1">
           <mxGeometry x="909" y="130" width="113" height="40" as="geometry" />
         </mxCell>
-        <mxCell id="t-YS1E50rEHye12wR0vu-14" value="DC-BR-SAOPAULO&lt;br&gt;5.00%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#BDBDBD;strokeWidth=1;fontColor=#333333;fontSize=10;" vertex="1" parent="1">
+        <mxCell id="t-YS1E50rEHye12wR0vu-14" value="DC-BR-SAOPAULO&lt;br&gt;4.65%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#BDBDBD;strokeWidth=1;fontColor=#333333;fontSize=10;" vertex="1" parent="1">
           <mxGeometry x="1030" y="130" width="113" height="40" as="geometry" />
         </mxCell>
-        <mxCell id="t-YS1E50rEHye12wR0vu-15" value="DC-UK-LONDON&lt;br&gt;3.72%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#BDBDBD;strokeWidth=1;fontColor=#333333;fontSize=10;" vertex="1" parent="1">
+        <mxCell id="t-YS1E50rEHye12wR0vu-15" value="DC-UK-LONDON&lt;br&gt;4.06%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#BDBDBD;strokeWidth=1;fontColor=#333333;fontSize=10;" vertex="1" parent="1">
           <mxGeometry x="1151" y="130" width="113" height="40" as="geometry" />
         </mxCell>
-        <mxCell id="t-YS1E50rEHye12wR0vu-16" value="DC-DE-FRANKFURT&lt;br&gt;23.51%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#BDBDBD;strokeWidth=1;fontColor=#333333;fontSize=10;" vertex="1" parent="1">
+        <mxCell id="t-YS1E50rEHye12wR0vu-16" value="DC-DE-FRANKFURT&lt;br&gt;35.69%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#BDBDBD;strokeWidth=1;fontColor=#333333;fontSize=10;" vertex="1" parent="1">
           <mxGeometry x="1272" y="130" width="113" height="40" as="geometry" />
         </mxCell>
         <mxCell id="t-YS1E50rEHye12wR0vu-17" value="Ingress L7 (NGINX)&lt;br&gt;SSL-терминация/L7-маршрут" style="rounded=1;whiteSpace=wrap;html=1;arcSize=14;fillColor=#DDEED7;strokeColor=#7DA36B;strokeWidth=1.5;fontColor=#333333;fontSize=12;" vertex="1" parent="1">
@@ -129,12 +129,9 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="t-YS1E50rEHye12wR0vu-42" value="RTP / SRTP" style="endArrow=block;endFill=1;html=1;rounded=1;edgeStyle=orthogonalEdgeStyle;jettySize=auto;strokeColor=#A0A0A0;strokeWidth=1.2;fontColor=#D0D0D0;fontSize=10;labelBackgroundColor=#151515;exitX=1;exitY=0.6034;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="t-YS1E50rEHye12wR0vu-11" target="t-YS1E50rEHye12wR0vu-18">
+        <mxCell id="t-YS1E50rEHye12wR0vu-42" value="RTP / SRTP напрямую в SFU" style="endArrow=block;endFill=1;html=1;rounded=1;edgeStyle=orthogonalEdgeStyle;jettySize=auto;strokeColor=#A0A0A0;strokeWidth=1.2;fontColor=#D0D0D0;fontSize=10;labelBackgroundColor=#151515;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="t-YS1E50rEHye12wR0vu-8" target="t-YS1E50rEHye12wR0vu-18">
           <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="760" y="565" />
-              <mxPoint x="760" y="662" />
-            </Array>
+            <Array as="points"><mxPoint x="416" y="662" /></Array>
           </mxGeometry>
         </mxCell>
         <mxCell id="t-YS1E50rEHye12wR0vu-43" value="гео/веса/статус" style="endArrow=block;endFill=1;html=1;rounded=1;edgeStyle=orthogonalEdgeStyle;jettySize=auto;strokeColor=#A0A0A0;strokeWidth=1.2;fontColor=#D0D0D0;fontSize=10;labelBackgroundColor=#151515;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.0198;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="t-YS1E50rEHye12wR0vu-9" target="t-YS1E50rEHye12wR0vu-6">
@@ -296,13 +293,13 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
       
-        <mxCell id="mf-dc-6" value="DC-IN-MUMBAI&lt;br&gt;4.35%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#BDBDBD;strokeWidth=1;fontColor=#333333;fontSize=10;" vertex="1" parent="1">
+        <mxCell id="mf-dc-6" value="DC-IN-MUMBAI&lt;br&gt;5.03%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#BDBDBD;strokeWidth=1;fontColor=#333333;fontSize=10;" vertex="1" parent="1">
           <mxGeometry x="1393" y="130" width="113" height="40" as="geometry" />
         </mxCell>
-        <mxCell id="mf-dc-7" value="DC-SG-SINGAPORE&lt;br&gt;11.50%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#BDBDBD;strokeWidth=1;fontColor=#333333;fontSize=10;" vertex="1" parent="1">
+        <mxCell id="mf-dc-7" value="DC-SG-SINGAPORE&lt;br&gt;6.97%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#BDBDBD;strokeWidth=1;fontColor=#333333;fontSize=10;" vertex="1" parent="1">
           <mxGeometry x="1514" y="130" width="113" height="40" as="geometry" />
         </mxCell>
-        <mxCell id="mf-dc-8" value="DC-JP-TOKYO&lt;br&gt;5.00%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#BDBDBD;strokeWidth=1;fontColor=#333333;fontSize=10;" vertex="1" parent="1">
+        <mxCell id="mf-dc-8" value="DC-JP-TOKYO&lt;br&gt;7.36%" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#BDBDBD;strokeWidth=1;fontColor=#333333;fontSize=10;" vertex="1" parent="1">
           <mxGeometry x="1635" y="130" width="113" height="40" as="geometry" />
         </mxCell>
         <mxCell id="mf-interdc" value="межДЦ: прокси join в home_dc, репликация auth_pg и user_meetings" style="endArrow=block;endFill=1;html=1;rounded=1;edgeStyle=orthogonalEdgeStyle;jettySize=auto;strokeColor=#A0A0A0;strokeWidth=1.2;fontColor=#D0D0D0;fontSize=10;labelBackgroundColor=#151515;exitDx=0;exitDy=0;entryDx=0;entryDy=0;dashed=1;exitX=0.5;exitY=0;entryX=0.824;entryY=1;startArrow=block;startFill=1;" edge="1" parent="1" source="t-YS1E50rEHye12wR0vu-5" target="t-YS1E50rEHye12wR0vu-6">

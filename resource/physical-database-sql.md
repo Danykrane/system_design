@@ -25,9 +25,8 @@ Table session_redis.user_sessions {
   created_at datetime
 
   indexes {
-    session_id [name: "key_session_id"]
-    user_id [name: "idx_sessions_user_id"]
-    expires_at [name: "ttl_sessions_expires_at"]
+    session_id [name: "key_session_id", note: 'Redis: доступ только по ключу, вторичных индексов нет']
+    expires_at [name: "ttl_sessions_expires_at", note: 'TTL ключа']
   }
 }
 
@@ -70,15 +69,14 @@ Table meeting_pg.meeting_invite_links {
   id uuid [pk]
   meeting_id uuid [not null]
   created_by_user_id uuid [not null]
-  token varchar [unique, not null]
-  token_hash bigint [not null]
+  token varchar [not null]
+  token_hash bigint [not null, note: 'hash(token), колонка распределения Citus']
   created_at datetime
   expires_at datetime
   revoked boolean
 
   indexes {
-    token [unique, name: "ux_invite_token"]
-    token_hash [name: "idx_invite_token_hash"]
+    (token_hash, token) [unique, name: "ux_invite_token_hash_token", note: 'Citus: UNIQUE и PK включают колонку распределения; физически PK = (token_hash, id)']
     expires_at [name: "idx_invite_expires_at"]
     (meeting_id, created_at) [name: "idx_invite_meeting_created"]
   }
@@ -107,13 +105,12 @@ Table runtime_redis.meetings_runtime {
   updated_at datetime
 
   indexes {
-    meeting_id [name: "key_runtime_meeting_id"]
-    updated_at [name: "idx_runtime_updated_at"]
+    meeting_id [name: "key_runtime_meeting_id", note: 'Redis: TTL ключа продлевает heartbeat, вторичных индексов нет']
   }
 }
 
 Table chat_scylla.chat_messages {
-  id uuid [unique, not null]
+  id uuid [not null, note: 'client_msg_id; идемпотентность — ключ chat_dedup в Redis (SET NX EX 60)']
   meeting_id uuid [not null]
   bucket smallint [not null]
   message_seq integer [not null]
@@ -123,7 +120,6 @@ Table chat_scylla.chat_messages {
 
   indexes {
     (meeting_id, bucket, message_seq) [pk, name: "pk_chat_meeting_bucket_seq"]
-    id [unique, name: "ux_chat_message_id"]
     (user_id, created_at) [name: "idx_chat_user_created"]
   }
 }
@@ -140,7 +136,7 @@ Table recording_pg.recordings {
   created_at datetime
 
   indexes {
-    id [name: "pk_recordings_id"]
+    id [name: "pk_recordings_id", note: 'Citus: физически PK = (meeting_id, id), колонка распределения — meeting_id']
     (meeting_id, created_at) [name: "idx_recordings_meeting_created"]
     (status, created_at) [name: "idx_recordings_status_created"]
     storage_key [name: "idx_recordings_storage_key"]
