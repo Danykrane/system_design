@@ -694,6 +694,8 @@ sequenceDiagram
 
 Медиа идёт мимо L4 и L7: клиент получает адрес конкретного SFU в ответе `join` (п. 3.5). Так встреча остаётся на одном SFU, а балансировщикам не нужно пропускать 78 Тбит/с.
 
+**Клиент за NAT и межсетевым экраном.** У SFU публичный адрес, и он работает как ICE-Lite: сам соединение не начинает, а отвечает на проверки, которые присылает клиент [^102]. Поэтому клиенту за домашним или офисным NAT не нужен ни STUN, ни TURN, чтобы достучаться до SFU. Если UDP закрыт межсетевым экраном, клиент подключается к тому же SFU по TCP: SFU слушает и UDP, и TCP [^102], а ICE умеет предлагать TCP-кандидаты [^103]. Медиа поверх TCP хуже переносит потери, но звонок не рвётся. Не поддерживаем в MVP только сети, где прокси пропускает исключительно TLS на порт 443: для них нужен TURN-релей по TLS, это улучшение после MVP.
+
 #### 4.2. Схема локальной и межсервисной балансировки
 
 ```mermaid
@@ -1838,3 +1840,7 @@ flowchart TD
 [^100]: [ScyllaDB CPP-RS Driver — Load balancing: token-aware, datacenter-aware, shard-awareness](https://cpp-rs-driver.docs.scylladb.com/stable/topics/configuration/load-balancing.html)
 
 [^101]: [ScyllaDB Documentation — CQL INSERT: в отличие от SQL, INSERT не проверяет, существует ли строка](https://docs.scylladb.com/manual/stable/cql/dml/insert.html)
+
+[^102]: [mediasoup Documentation — API: WebRtcTransport (ICE Lite: транспорт не начинает ICE, а ждёт ICE Binding Requests от клиента; listenInfos с протоколом udp или tcp)](https://mediasoup.org/documentation/v3/mediasoup/api/)
+
+[^103]: [RFC 6544 — TCP Candidates with Interactive Connectivity Establishment (ICE)](https://datatracker.ietf.org/doc/html/rfc6544)
